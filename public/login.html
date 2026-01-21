@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Bank Reconciliation System</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Serif:opsz,wght@8..144,300;8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>Bank Reconciliation</h1>
+                <p id="formTitle">Sign in to your account</p>
+            </div>
+
+            <!-- Alert Message -->
+            <div id="alertMessage" class="alert" style="display: none;"></div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="login-form">
+                <div class="form-group" id="nameGroup" style="display: none;">
+                    <label for="displayName">Full Name</label>
+                    <input type="text" id="displayName" placeholder="Enter your name" />
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" placeholder="Enter your email" required />
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter your password" required minlength="6" />
+                </div>
+
+                <div class="form-group" id="confirmPasswordGroup" style="display: none;">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input type="password" id="confirmPassword" placeholder="Confirm your password" />
+                </div>
+
+                <button type="submit" class="primary-btn" id="submitBtn">
+                    Sign In
+                </button>
+            </form>
+
+            <div id="forgotPasswordLink" style="text-align: center; margin-top: 1rem;">
+                <a href="#" id="forgotPasswordBtn" style="color: var(--primary-color); text-decoration: none; font-size: 0.875rem;">
+                    Forgot your password?
+                </a>
+            </div>
+
+            <div class="login-footer">
+                <p id="toggleText">
+                    Don't have an account?
+                    <a href="#" id="toggleModeBtn">Sign up</a>
+                </p>
+            </div>
+
+            <!-- Demo Mode Banner -->
+            <div id="demoBanner" style="margin-top: 1.5rem; padding: 1rem; background: var(--warning-light); border: 1px solid var(--warning-color); border-radius: var(--radius-md); display: none;">
+                <p style="font-size: 0.875rem; color: var(--warning-color); margin: 0;">
+                    <strong>Demo Mode:</strong> Firebase is not configured. The app will work with limited functionality.
+                    <a href="#" id="demoModeBtn" style="color: var(--primary-color); font-weight: 500;">
+                        Continue in Demo Mode
+                    </a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDvSJyK2VW928tZTTyxCLzRqKhhjS-Tweg",
+            authDomain: "bankrecreciepts.firebaseapp.com",
+            projectId: "bankrecreciepts",
+            storageBucket: "bankrecreciepts.firebasestorage.app",
+            messagingSenderId: "298789104173",
+            appId: "1:298789104173:web:338e4827a2b40e777866a4",
+            measurementId: "G-WD70M7R787"
+        };
+
+        let isSignUp = false;
+        let auth = null;
+
+        // Initialize Firebase
+        try {
+            firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+
+            // Check if already logged in
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    window.location.href = '/';
+                }
+            });
+        } catch (error) {
+            console.error('Firebase initialization error:', error);
+            document.getElementById('demoBanner').style.display = 'block';
+        }
+
+        // Toggle between login and signup
+        function toggleMode(e) {
+            if (e) e.preventDefault();
+            isSignUp = !isSignUp;
+
+            const formTitle = document.getElementById('formTitle');
+            const submitBtn = document.getElementById('submitBtn');
+            const nameGroup = document.getElementById('nameGroup');
+            const confirmPasswordGroup = document.getElementById('confirmPasswordGroup');
+            const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+
+            if (isSignUp) {
+                formTitle.textContent = 'Create your account';
+                submitBtn.textContent = 'Sign Up';
+                nameGroup.style.display = 'block';
+                confirmPasswordGroup.style.display = 'block';
+                forgotPasswordLink.style.display = 'none';
+                updateToggleText('Already have an account?', 'Sign in');
+            } else {
+                formTitle.textContent = 'Sign in to your account';
+                submitBtn.textContent = 'Sign In';
+                nameGroup.style.display = 'none';
+                confirmPasswordGroup.style.display = 'none';
+                forgotPasswordLink.style.display = 'block';
+                updateToggleText("Don't have an account?", 'Sign up');
+            }
+
+            hideAlert();
+        }
+
+        function updateToggleText(text, linkText) {
+            const toggleText = document.getElementById('toggleText');
+            toggleText.innerHTML = '';
+            toggleText.appendChild(document.createTextNode(text + ' '));
+            const link = document.createElement('a');
+            link.href = '#';
+            link.textContent = linkText;
+            link.addEventListener('click', toggleMode);
+            toggleText.appendChild(link);
+        }
+
+        // Show alert message
+        function showAlert(message, type = 'error') {
+            const alertEl = document.getElementById('alertMessage');
+            alertEl.textContent = message;
+            alertEl.className = 'alert alert-' + type;
+            alertEl.style.display = 'block';
+        }
+
+        // Hide alert message
+        function hideAlert() {
+            document.getElementById('alertMessage').style.display = 'none';
+        }
+
+        // Show forgot password prompt
+        function showForgotPassword(e) {
+            if (e) e.preventDefault();
+            const email = document.getElementById('email').value.trim();
+
+            if (!email) {
+                showAlert('Please enter your email address first.');
+                return;
+            }
+
+            if (!auth) {
+                showAlert('Firebase is not configured. Cannot reset password in demo mode.');
+                return;
+            }
+
+            auth.sendPasswordResetEmail(email)
+                .then(() => {
+                    showAlert('Password reset email sent! Check your inbox.', 'success');
+                })
+                .catch(error => {
+                    showAlert(getErrorMessage(error.code));
+                });
+        }
+
+        // Handle form submission
+        async function handleSubmit(e) {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const submitBtn = document.getElementById('submitBtn');
+
+            hideAlert();
+
+            if (!email || !password) {
+                showAlert('Please fill in all required fields.');
+                return;
+            }
+
+            if (!auth) {
+                showAlert('Firebase is not configured. Use Demo Mode to continue.');
+                return;
+            }
+
+            if (isSignUp) {
+                const displayName = document.getElementById('displayName').value.trim();
+                const confirmPassword = document.getElementById('confirmPassword').value;
+
+                if (!displayName) {
+                    showAlert('Please enter your name.');
+                    return;
+                }
+
+                if (password !== confirmPassword) {
+                    showAlert('Passwords do not match.');
+                    return;
+                }
+
+                if (password.length < 6) {
+                    showAlert('Password must be at least 6 characters.');
+                    return;
+                }
+            }
+
+            submitBtn.classList.add('btn-loading');
+            submitBtn.disabled = true;
+
+            try {
+                if (isSignUp) {
+                    const credential = await auth.createUserWithEmailAndPassword(email, password);
+                    const displayName = document.getElementById('displayName').value.trim();
+                    await credential.user.updateProfile({ displayName });
+                    showAlert('Account created successfully! Redirecting...', 'success');
+                    setTimeout(() => { window.location.href = '/'; }, 1000);
+                } else {
+                    await auth.signInWithEmailAndPassword(email, password);
+                    showAlert('Signed in successfully! Redirecting...', 'success');
+                    setTimeout(() => { window.location.href = '/'; }, 500);
+                }
+            } catch (error) {
+                console.error('Auth error:', error);
+                showAlert(getErrorMessage(error.code));
+            } finally {
+                submitBtn.classList.remove('btn-loading');
+                submitBtn.disabled = false;
+            }
+        }
+
+        // Enter demo mode
+        function enterDemoMode(e) {
+            if (e) e.preventDefault();
+            localStorage.setItem('demoMode', 'true');
+            window.location.href = '/';
+        }
+
+        // Get user-friendly error message
+        function getErrorMessage(errorCode) {
+            const messages = {
+                'auth/email-already-in-use': 'An account with this email already exists.',
+                'auth/invalid-email': 'Please enter a valid email address.',
+                'auth/operation-not-allowed': 'Email/password accounts are not enabled. Please enable it in Firebase Console.',
+                'auth/weak-password': 'Password is too weak. Use at least 6 characters.',
+                'auth/user-disabled': 'This account has been disabled.',
+                'auth/user-not-found': 'No account found with this email.',
+                'auth/wrong-password': 'Incorrect password.',
+                'auth/invalid-credential': 'Invalid email or password.',
+                'auth/too-many-requests': 'Too many failed attempts. Please try again later.',
+                'auth/network-request-failed': 'Network error. Please check your connection.'
+            };
+            return messages[errorCode] || 'An error occurred. Please try again.';
+        }
+
+        // Set up event listeners when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('loginForm').addEventListener('submit', handleSubmit);
+            document.getElementById('toggleModeBtn').addEventListener('click', toggleMode);
+            document.getElementById('forgotPasswordBtn').addEventListener('click', showForgotPassword);
+            document.getElementById('demoModeBtn').addEventListener('click', enterDemoMode);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,2011 @@
+// Municipal Bank Reconciliation Application - Enhanced Version
+class BankReconciliation {
+    constructor() {
+        this.bankData = [];
+        this.glData = [];
+        this.matchedTransactions = [];
+        this.unmatchedBank = [];
+        this.unmatchedGL = [];
+        this.manualMatches = []; // Track manual matches
+        this.bankFileName = '';
+        this.glFileName = '';
+        this.settings = {
+            dateRange: 3,
+            amountTolerance: 0.00
+        };
+        this.filters = {
+            dateFrom: null,
+            dateTo: null,
+            amountMin: null,
+            amountMax: null,
+            searchText: ''
+        };
+        this.currentTab = 'matched';
+        this.init();
+    }
+
+    init() {
+        this.setupEventListeners();
+        this.addConsoleMessage();
+    }
+
+    addConsoleMessage() {
+        console.log('%c Municipal Bank Reconciliation System v2.0 ', 'background: #2563eb; color: white; font-size: 14px; padding: 5px;');
+        console.log('Debug mode enabled. File parsing and matching details will be logged here.');
+        console.log('Excel files will be automatically converted for processing.');
+    }
+
+    setupEventListeners() {
+        // File inputs
+        document.getElementById('bankFile').addEventListener('change', (e) => this.handleFileSelect(e, 'bank'));
+        document.getElementById('glFile').addEventListener('change', (e) => this.handleFileSelect(e, 'gl'));
+
+        // Settings
+        document.getElementById('dateRange').addEventListener('change', (e) => {
+            this.settings.dateRange = parseInt(e.target.value);
+        });
+        document.getElementById('amountTolerance').addEventListener('change', (e) => {
+            this.settings.amountTolerance = parseFloat(e.target.value);
+        });
+
+        // Reconcile button
+        document.getElementById('reconcileBtn').addEventListener('click', () => this.startReconciliation());
+
+        // Export buttons
+        document.getElementById('exportExcel').addEventListener('click', () => this.exportToExcel());
+        document.getElementById('exportCSV').addEventListener('click', () => this.exportToCSV());
+        document.getElementById('printReport').addEventListener('click', () => this.printReport());
+
+        // Debug button
+        document.getElementById('debugBtn').addEventListener('click', () => this.showDebugInfo());
+
+        // Reset button
+        document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+
+        // Tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
+        });
+
+        // Filter controls
+        document.getElementById('dateFrom')?.addEventListener('change', (e) => {
+            this.filters.dateFrom = e.target.value ? new Date(e.target.value) : null;
+            this.applyFilters();
+        });
+
+        document.getElementById('dateTo')?.addEventListener('change', (e) => {
+            this.filters.dateTo = e.target.value ? new Date(e.target.value) : null;
+            this.applyFilters();
+        });
+
+        document.getElementById('amountMin')?.addEventListener('input', (e) => {
+            this.filters.amountMin = e.target.value ? parseFloat(e.target.value) : null;
+            this.applyFilters();
+        });
+
+        document.getElementById('amountMax')?.addEventListener('input', (e) => {
+            this.filters.amountMax = e.target.value ? parseFloat(e.target.value) : null;
+            this.applyFilters();
+        });
+
+        document.getElementById('searchText')?.addEventListener('input', (e) => {
+            this.filters.searchText = e.target.value.toLowerCase();
+            this.applyFilters();
+        });
+
+        document.getElementById('clearFilters')?.addEventListener('click', () => this.clearFilters());
+    }
+
+    handleFileSelect(event, type) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        console.log(`[FILE] Loading ${type} file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+
+        // Store filename
+        if (type === 'bank') {
+            this.bankFileName = file.name;
+        } else {
+            this.glFileName = file.name;
+        }
+
+        const fileNameElement = document.getElementById(`${type}FileName`);
+        fileNameElement.textContent = file.name;
+        fileNameElement.style.color = '#059669';
+
+        const extension = file.name.split('.').pop().toLowerCase();
+
+        // Handle new file formats via server-side parsing
+        if (['pdf', 'ofx', 'qfx', 'qif'].includes(extension)) {
+            this.parseServerSideFile(file, type);
+            return;
+        }
+
+        if (type === 'bank') {
+            if (extension === 'csv') {
+                this.parseBankCSV(file);
+            } else if (extension === 'xlsx' || extension === 'xls') {
+                this.parseBankExcel(file);
+            } else {
+                this.parseBankCSV(file); // Default to CSV parsing
+            }
+        } else {
+            this.parseGLFile(file);
+        }
+    }
+
+    // Server-side parsing for PDF, OFX, QFX, QIF files
+    async parseServerSideFile(file, type) {
+        console.log(`[PARSE] Sending ${file.name} to server for parsing...`);
+
+        const fileNameElement = document.getElementById(`${type}FileName`);
+        fileNameElement.textContent = `${file.name} (parsing...)`;
+        fileNameElement.style.color = '#d97706';
+
+        try {
+            const result = await apiClient.parseFile(file, type);
+
+            console.log(`[PARSE] Server parsed ${result.rowCount} rows from ${result.parser} file`);
+
+            if (type === 'bank') {
+                // Transform server data to match expected format
+                this.bankData = result.data.map(item => ({
+                    transactionNumber: item.fitId || item.checkNumber || '',
+                    date: item.date,
+                    description: item.description || item.name || item.payee || '',
+                    memo: item.memo || '',
+                    amountCredit: item.amountCredit || (item.amount > 0 ? item.amount : 0),
+                    amountDebit: item.amountDebit || (item.amount < 0 ? Math.abs(item.amount) : 0),
+                    balance: item.balance || 0,
+                    checkNumber: item.checkNumber || '',
+                    amount: item.amountCredit || item.amount || 0,
+                    rawRow: item.rawLine || JSON.stringify(item)
+                }));
+
+                console.log(`[SUCCESS] Parsed ${this.bankData.length} bank transactions from ${result.parser}`);
+            } else {
+                // GL data
+                this.glData = result.data.map(item => ({
+                    accountNumber: item.accountNumber || '',
+                    description: item.description || '',
+                    type: item.type || '',
+                    beginBalance: item.beginBalance || 0,
+                    endingBalance: item.endingBalance || 0,
+                    debit: item.debit || item.amount || 0,
+                    amount: item.debit || item.amount || 0,
+                    rawRow: item.rawLine || JSON.stringify(item)
+                }));
+
+                console.log(`[SUCCESS] Parsed ${this.glData.length} GL entries from ${result.parser}`);
+            }
+
+            fileNameElement.textContent = `${file.name} (${result.rowCount} rows)`;
+            fileNameElement.style.color = '#059669';
+
+            this.checkReadyToReconcile();
+        } catch (error) {
+            console.error(`[ERROR] Server parsing failed:`, error);
+            fileNameElement.textContent = `${file.name} (parse failed)`;
+            fileNameElement.style.color = '#dc2626';
+            alert(`Failed to parse ${file.name}: ${error.message}`);
+        }
+    }
+
+    parseBankCSV(file) {
+        Papa.parse(file, {
+            header: false,  // Don't auto-detect headers - we'll do it smartly
+            skipEmptyLines: true,
+            complete: (results) => {
+                console.log('[PARSE] Raw CSV data received, rows:', results.data.length);
+                console.log('[PARSE] First 10 rows:', results.data.slice(0, 10));
+
+                const parsed = this.smartParseBankData(results.data);
+                this.bankData = parsed;
+
+                console.log(`[SUCCESS] Parsed ${this.bankData.length} bank transactions`);
+                if (this.bankData.length > 0) {
+                    console.log('[SAMPLE] First bank transaction:', this.bankData[0]);
+                    console.log('[SAMPLE] Last bank transaction:', this.bankData[this.bankData.length - 1]);
+                } else {
+                    console.error('[ERROR] No bank transactions were parsed!');
+                }
+                this.checkReadyToReconcile();
+            },
+            error: (error) => {
+                console.error('[ERROR] Parsing bank CSV:', error);
+                alert('Error parsing bank CSV: ' + error.message);
+            }
+        });
+    }
+
+    parseBankExcel(file) {
+        console.log('[EXCEL] Starting Bank Excel file processing...');
+        const reader = new FileReader();
+
+        reader.onerror = () => {
+            console.error('[ERROR] Failed to read Bank Excel file');
+            alert('Failed to read Bank Excel file. Please try again.');
+        };
+
+        reader.onload = (e) => {
+            try {
+                console.log('[EXCEL] Bank file loaded, parsing workbook...');
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {
+                    type: 'array',
+                    cellDates: true,
+                    cellNF: false,
+                    cellText: false
+                });
+
+                console.log('[EXCEL] Workbook sheets found:', workbook.SheetNames);
+
+                // Get the first sheet
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+
+                console.log('[EXCEL] Processing sheet:', sheetName);
+
+                // Convert sheet to array format
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+                    header: 1,
+                    defval: '',
+                    raw: false,
+                    dateNF: 'mm/dd/yyyy'
+                });
+
+                console.log('[EXCEL] Extracted', jsonData.length, 'rows from Bank Excel');
+                console.log('[EXCEL] First 10 rows:', jsonData.slice(0, 10));
+
+                const parsed = this.smartParseBankData(jsonData);
+                this.bankData = parsed;
+
+                console.log(`[SUCCESS] Parsed ${this.bankData.length} bank transactions`);
+                if (this.bankData.length > 0) {
+                    console.log('[SAMPLE] First bank transaction:', this.bankData[0]);
+                    console.log('[SAMPLE] Last bank transaction:', this.bankData[this.bankData.length - 1]);
+                } else {
+                    console.error('[ERROR] No bank transactions were parsed!');
+                }
+                this.checkReadyToReconcile();
+            } catch (error) {
+                console.error('[ERROR] Bank Excel parsing failed:', error);
+                console.error('[ERROR] Stack trace:', error.stack);
+                alert('Error parsing Bank Excel file:\n\n' + error.message + '\n\nPlease check the console (F12) for details, or try saving as CSV first.');
+            }
+        };
+
+        console.log('[EXCEL] Reading Bank file as ArrayBuffer...');
+        reader.readAsArrayBuffer(file);
+    }
+
+    smartParseBankData(rows) {
+        console.log('[SMART] Starting intelligent bank data parsing...');
+
+        // First, check if this is a headerless format (like the complex bank export format)
+        // Look for timestamp patterns like "20251205000000[-5:EST]*" in first column
+        const firstRow = rows[0];
+        if (firstRow && firstRow[0] && /^\d{14}\[/.test(String(firstRow[0]))) {
+            console.log('[SMART] Detected headerless bank export format');
+            return this.parseHeaderlessBankFormat(rows);
+        }
+
+        // Find header row by looking for date-like patterns and amount columns
+        let headerRowIdx = -1;
+        let headers = [];
+
+        for (let i = 0; i < Math.min(rows.length, 20); i++) {
+            const row = rows[i];
+            const rowStr = row.join('|').toLowerCase();
+
+            // Look for key indicators of a header row
+            if (rowStr.includes('date') && (rowStr.includes('amount') || rowStr.includes('debit') || rowStr.includes('credit'))) {
+                headerRowIdx = i;
+                headers = row.map(h => String(h).trim());
+                console.log(`[SMART] Found header row at line ${i}:`, headers);
+                break;
+            }
+        }
+
+        if (headerRowIdx === -1) {
+            console.log('[SMART] No header found, attempting to parse as data-only format');
+            return this.parseDataOnlyBankFormat(rows);
+        }
+
+        // Create column mapping using fuzzy matching
+        const columnMap = this.detectBankColumns(headers);
+        console.log('[SMART] Column mapping:', columnMap);
+
+        // Parse data rows
+        const dataRows = rows.slice(headerRowIdx + 1);
+        const transactions = [];
+
+        for (const row of dataRows) {
+            // Skip empty rows
+            if (row.length === 0 || row.every(cell => !cell || String(cell).trim() === '')) {
+                continue;
+            }
+
+            // Check if this row has a valid date
+            const dateValue = row[columnMap.date];
+            if (!dateValue || !this.isValidDate(dateValue)) {
+                continue;
+            }
+
+            // Parse amounts - get both debit and credit
+            const credit = this.parseAmount(row[columnMap.credit] || '0');
+            const debit = this.parseAmount(row[columnMap.debit] || '0');
+            const amount = credit > 0 ? credit : (debit > 0 ? -debit : this.parseAmount(row[columnMap.amount] || '0'));
+
+            // Skip if no amount
+            if (amount === 0) {
+                continue;
+            }
+
+            transactions.push({
+                transactionNumber: row[columnMap.transactionNumber] || '',
+                date: this.parseDate(dateValue),
+                description: row[columnMap.description] || '',
+                memo: row[columnMap.memo] || '',
+                amountCredit: credit,
+                amountDebit: debit,
+                balance: this.parseAmount(row[columnMap.balance] || '0'),
+                checkNumber: row[columnMap.checkNumber] || '',
+                amount: Math.abs(amount),
+                isDebit: amount < 0 || debit > 0,
+                rawRow: row
+            });
+        }
+
+        console.log(`[SMART] Extracted ${transactions.length} valid transactions from bank`);
+        return transactions;
+    }
+
+    parseHeaderlessBankFormat(rows) {
+        // Format: "20251205000000[-5:EST]*-6270.42*1*18969*Check Withdrawal,12/5/2025,Check Withdrawal,..."
+        const transactions = [];
+
+        for (const row of rows) {
+            // Skip empty rows
+            if (!row || row.length === 0 || !row[0]) continue;
+
+            const firstCell = String(row[0]).trim();
+
+            // Skip summary rows or empty first cells
+            if (!firstCell || firstCell.startsWith(',')) continue;
+
+            // Try to parse the complex format
+            // First cell contains: timestamp*amount*flag*checknum*description
+            const parts = firstCell.split('*');
+            if (parts.length >= 4) {
+                const timestamp = parts[0]; // e.g., "20251205000000[-5:EST]"
+                const amount = this.parseAmount(parts[1]); // e.g., "-6270.42"
+                const checkNumber = parts[3]; // e.g., "18969"
+                const description = parts[4] || '';
+
+                // Parse date from timestamp (YYYYMMDD)
+                const dateMatch = timestamp.match(/^(\d{4})(\d{2})(\d{2})/);
+                let date = null;
+                if (dateMatch) {
+                    date = new Date(parseInt(dateMatch[1]), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[3]));
+                }
+
+                // Also check for date in other columns (e.g., column 1 might have "12/5/2025")
+                if (!date && row[1]) {
+                    date = this.parseDate(row[1]);
+                }
+
+                if (date && amount !== 0) {
+                    transactions.push({
+                        transactionNumber: checkNumber || '',
+                        date: date,
+                        description: description || row[2] || '',
+                        memo: row[3] || '',
+                        amountCredit: amount > 0 ? amount : 0,
+                        amountDebit: amount < 0 ? Math.abs(amount) : 0,
+                        balance: this.parseAmount(row[6] || '0'),
+                        checkNumber: checkNumber || '',
+                        amount: Math.abs(amount),
+                        isDebit: amount < 0,
+                        rawRow: row
+                    });
+                }
+            } else {
+                // Try standard column format
+                // Columns might be: Date, Description, Memo, Debit, Credit, Balance, CheckNum
+                const dateValue = row[1] || row[0];
+                if (this.isValidDate(dateValue)) {
+                    const debit = this.parseAmount(row[4] || '0');
+                    const credit = this.parseAmount(row[5] || '0');
+                    const amount = credit > 0 ? credit : debit;
+
+                    if (amount !== 0) {
+                        transactions.push({
+                            transactionNumber: row[6] || '',
+                            date: this.parseDate(dateValue),
+                            description: row[2] || '',
+                            memo: row[3] || '',
+                            amountCredit: credit,
+                            amountDebit: debit,
+                            balance: 0,
+                            checkNumber: row[6] || row[7] || '',
+                            amount: Math.abs(amount),
+                            isDebit: debit > 0,
+                            rawRow: row
+                        });
+                    }
+                }
+            }
+        }
+
+        console.log(`[SMART] Parsed ${transactions.length} transactions from headerless format`);
+        return transactions;
+    }
+
+    parseDataOnlyBankFormat(rows) {
+        // Try to infer structure from data patterns
+        const transactions = [];
+
+        for (const row of rows) {
+            if (!row || row.length < 3) continue;
+
+            // Look for date pattern in any column
+            let dateIdx = -1;
+            let dateValue = null;
+
+            for (let i = 0; i < Math.min(row.length, 5); i++) {
+                if (this.isValidDate(row[i])) {
+                    dateIdx = i;
+                    dateValue = row[i];
+                    break;
+                }
+            }
+
+            if (!dateValue) continue;
+
+            // Look for amount columns (numbers with currency formatting)
+            let amounts = [];
+            for (let i = 0; i < row.length; i++) {
+                const val = this.parseAmount(row[i]);
+                if (val !== 0) {
+                    amounts.push({ idx: i, value: val });
+                }
+            }
+
+            if (amounts.length === 0) continue;
+
+            // Use the largest amount as the main amount
+            const mainAmount = amounts.reduce((a, b) => Math.abs(a.value) > Math.abs(b.value) ? a : b);
+
+            // Find description (usually longest text field)
+            let description = '';
+            for (let i = 0; i < row.length; i++) {
+                const cell = String(row[i] || '').trim();
+                if (cell.length > description.length && !/^[\d.,$()\-\s]+$/.test(cell) && !this.isValidDate(cell)) {
+                    description = cell;
+                }
+            }
+
+            transactions.push({
+                transactionNumber: '',
+                date: this.parseDate(dateValue),
+                description: description,
+                memo: '',
+                amountCredit: mainAmount.value > 0 ? mainAmount.value : 0,
+                amountDebit: mainAmount.value < 0 ? Math.abs(mainAmount.value) : 0,
+                balance: 0,
+                checkNumber: '',
+                amount: Math.abs(mainAmount.value),
+                isDebit: mainAmount.value < 0,
+                rawRow: row
+            });
+        }
+
+        console.log(`[SMART] Parsed ${transactions.length} transactions from data-only format`);
+        return transactions;
+    }
+
+    detectBankColumns(headers) {
+        console.log('[DETECT] Analyzing column headers...');
+
+        const map = {
+            transactionNumber: -1,
+            date: -1,
+            description: -1,
+            memo: -1,
+            debit: -1,
+            credit: -1,
+            amount: -1,
+            balance: -1,
+            checkNumber: -1,
+            fees: -1
+        };
+
+        headers.forEach((header, idx) => {
+            const h = String(header).toLowerCase().trim();
+
+            // Date column
+            if (h.includes('date') && !h.includes('update')) {
+                map.date = idx;
+            }
+            // Transaction number
+            else if (h.includes('transaction') && h.includes('number')) {
+                map.transactionNumber = idx;
+            }
+            // Description
+            else if (h === 'description' || h.includes('desc')) {
+                map.description = idx;
+            }
+            // Memo
+            else if (h === 'memo' || h.includes('note') || h.includes('comment')) {
+                map.memo = idx;
+            }
+            // Debit
+            else if (h.includes('debit') || h === 'dr' || h.includes('withdrawal')) {
+                map.debit = idx;
+            }
+            // Credit
+            else if (h.includes('credit') || h === 'cr' || h.includes('deposit')) {
+                map.credit = idx;
+            }
+            // Amount
+            else if (h === 'amount' || h === 'amt') {
+                map.amount = idx;
+            }
+            // Balance
+            else if (h.includes('balance') || h === 'bal') {
+                map.balance = idx;
+            }
+            // Check number
+            else if (h.includes('check') && h.includes('number')) {
+                map.checkNumber = idx;
+            }
+            // Fees
+            else if (h.includes('fee') || h.includes('charge')) {
+                map.fees = idx;
+            }
+        });
+
+        return map;
+    }
+
+    isValidDate(dateStr) {
+        if (!dateStr || String(dateStr).trim() === '') return false;
+
+        const str = String(dateStr).trim();
+
+        // Check for common date patterns
+        const patterns = [
+            /^\d{1,2}\/\d{1,2}\/\d{2,4}$/,  // MM/DD/YYYY or M/D/YY
+            /^\d{4}-\d{2}-\d{2}$/,           // YYYY-MM-DD
+            /^\d{1,2}-\d{1,2}-\d{2,4}$/      // MM-DD-YYYY
+        ];
+
+        return patterns.some(pattern => pattern.test(str));
+    }
+
+    parseGLFile(file) {
+        const extension = file.name.split('.').pop().toLowerCase();
+
+        if (extension === 'csv') {
+            this.parseGLCSV(file);
+        } else if (extension === 'xlsx' || extension === 'xls') {
+            this.parseGLExcel(file);
+        }
+    }
+
+    parseGLCSV(file) {
+        console.log('[CSV] Starting GL CSV file processing...');
+        Papa.parse(file, {
+            header: false,  // Smart parsing
+            skipEmptyLines: true,
+            complete: (results) => {
+                console.log('[CSV] GL CSV data received, rows:', results.data.length);
+                console.log('[CSV] First 10 rows:', results.data.slice(0, 10));
+
+                const parsed = this.smartParseGLData(results.data);
+                this.glData = parsed;
+
+                console.log(`[SUCCESS] Parsed ${this.glData.length} GL entries`);
+                if (this.glData.length > 0) {
+                    console.log('[SAMPLE] First GL entry:', this.glData[0]);
+                    console.log('[SAMPLE] Last GL entry:', this.glData[this.glData.length - 1]);
+                } else {
+                    console.error('[ERROR] No GL entries were parsed!');
+                }
+                this.checkReadyToReconcile();
+            },
+            error: (error) => {
+                console.error('[ERROR] Parsing GL CSV:', error);
+                alert('Error parsing GL CSV: ' + error.message);
+            }
+        });
+    }
+
+    parseGLExcel(file) {
+        console.log('[EXCEL] Starting Excel file processing...');
+        const reader = new FileReader();
+
+        reader.onerror = () => {
+            console.error('[ERROR] Failed to read Excel file');
+            alert('Failed to read Excel file. Please try again.');
+        };
+
+        reader.onload = (e) => {
+            try {
+                console.log('[EXCEL] File loaded, parsing workbook...');
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {
+                    type: 'array',
+                    cellDates: true,
+                    cellNF: false,
+                    cellText: false
+                });
+
+                console.log('[EXCEL] Workbook sheets found:', workbook.SheetNames);
+
+                // Get the first sheet
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+
+                console.log('[EXCEL] Processing sheet:', sheetName);
+
+                // Convert sheet to array format
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+                    header: 1,
+                    defval: '',
+                    raw: false,
+                    dateNF: 'mm/dd/yyyy'
+                });
+
+                console.log('[EXCEL] Extracted', jsonData.length, 'rows from Excel');
+                console.log('[EXCEL] First 10 rows:', jsonData.slice(0, 10));
+
+                const parsed = this.smartParseGLData(jsonData);
+                this.glData = parsed;
+
+                console.log(`[SUCCESS] Parsed ${this.glData.length} GL entries`);
+                if (this.glData.length > 0) {
+                    console.log('[SAMPLE] First GL entry:', this.glData[0]);
+                    console.log('[SAMPLE] Last GL entry:', this.glData[this.glData.length - 1]);
+                } else {
+                    console.error('[ERROR] No GL entries were parsed!');
+                }
+                this.checkReadyToReconcile();
+            } catch (error) {
+                console.error('[ERROR] Excel parsing failed:', error);
+                console.error('[ERROR] Stack trace:', error.stack);
+                alert('Error parsing GL Excel file:\n\n' + error.message + '\n\nPlease check the console (F12) for details, or try saving as CSV first.');
+            }
+        };
+
+        console.log('[EXCEL] Reading file as ArrayBuffer...');
+        reader.readAsArrayBuffer(file);
+    }
+
+    smartParseGLData(rows) {
+        console.log('[SMART] Starting intelligent GL data parsing...');
+
+        // Find header row
+        let headerRowIdx = -1;
+        let headers = [];
+
+        for (let i = 0; i < Math.min(rows.length, 20); i++) {
+            const row = rows[i];
+            const rowStr = row.join('|').toLowerCase();
+
+            // Look for account number column as key indicator
+            if (rowStr.includes('account') && (rowStr.includes('number') || rowStr.includes('no') || rowStr.includes('description'))) {
+                headerRowIdx = i;
+                headers = row.map(h => String(h).trim());
+                console.log(`[SMART] Found header row at line ${i}:`, headers);
+                break;
+            }
+
+            // Also check for "check" and "vendor" columns (Checks Issued format)
+            if (rowStr.includes('check') && (rowStr.includes('vendor') || rowStr.includes('amount'))) {
+                headerRowIdx = i;
+                headers = row.map(h => String(h).trim());
+                console.log(`[SMART] Found check register header at line ${i}:`, headers);
+                break;
+            }
+        }
+
+        if (headerRowIdx === -1) {
+            console.error('[ERROR] Could not find header row in GL file');
+            return [];
+        }
+
+        // Detect columns
+        const columnMap = this.detectGLColumns(headers);
+        console.log('[SMART] Column mapping:', columnMap);
+
+        // Parse data rows
+        const dataRows = rows.slice(headerRowIdx + 1);
+        const entries = [];
+
+        for (const row of dataRows) {
+            // Skip empty rows
+            if (row.length === 0 || row.every(cell => !cell || String(cell).trim() === '')) {
+                continue;
+            }
+
+            // Check if this is a Check Register format (has check number and vendor name)
+            if (columnMap.checkNumber >= 0 && columnMap.vendorName >= 0) {
+                const checkNum = row[columnMap.checkNumber];
+                const vendorName = row[columnMap.vendorName];
+                const amount = this.parseAmount(row[columnMap.amount] || row[columnMap.netAmount] || '0');
+
+                if (checkNum && amount !== 0) {
+                    // Parse date (might be Excel serial number)
+                    let date = null;
+                    if (columnMap.checkDate >= 0 && row[columnMap.checkDate]) {
+                        date = this.parseExcelDate(row[columnMap.checkDate]);
+                    }
+
+                    entries.push({
+                        accountNumber: String(checkNum).trim(),
+                        description: vendorName ? String(vendorName).trim() : '',
+                        type: 'Check',
+                        date: date,
+                        beginBalance: 0,
+                        endingBalance: 0,
+                        debit: 0,
+                        credit: amount,
+                        amount: amount,
+                        checkNumber: String(checkNum).trim(),
+                        vendorCode: row[columnMap.vendor] ? String(row[columnMap.vendor]).trim() : '',
+                        rawRow: row
+                    });
+                }
+                continue;
+            }
+
+            // Standard GL format - must have account number
+            const accountNumber = row[columnMap.accountNumber];
+            if (!accountNumber || String(accountNumber).trim() === '') {
+                continue;
+            }
+
+            // Get both debit and credit
+            const debit = this.parseAmount(row[columnMap.debit] || '0');
+            const credit = this.parseAmount(row[columnMap.credit] || '0');
+            const amount = debit > 0 ? debit : credit;
+
+            // Skip if no amount
+            if (amount === 0) {
+                continue;
+            }
+
+            // Parse date (might be Excel serial number)
+            let date = null;
+            if (columnMap.date >= 0 && row[columnMap.date]) {
+                date = this.parseExcelDate(row[columnMap.date]);
+            }
+
+            // Get reference number (check number from description like "Chk: 19032")
+            let refNumber = '';
+            const descStr = row[columnMap.glDescription] || row[columnMap.description] || '';
+            const chkMatch = String(descStr).match(/Chk:\s*(\d+)/i);
+            if (chkMatch) {
+                refNumber = chkMatch[1];
+            }
+
+            entries.push({
+                accountNumber: String(accountNumber).trim(),
+                description: row[columnMap.glDescription] ? String(row[columnMap.glDescription]).trim() :
+                             (row[columnMap.description] ? String(row[columnMap.description]).trim() : ''),
+                accountDescription: row[columnMap.accountDescription] ? String(row[columnMap.accountDescription]).trim() : '',
+                type: row[columnMap.type] ? String(row[columnMap.type]).trim() :
+                      (row[columnMap.transactionType] ? String(row[columnMap.transactionType]).trim() : ''),
+                date: date,
+                refNumber: row[columnMap.refNumber] || refNumber,
+                beginBalance: this.parseAmount(row[columnMap.beginBalance] || '0'),
+                endingBalance: this.parseAmount(row[columnMap.endingBalance] || row[columnMap.balance] || '0'),
+                debit: debit,
+                credit: credit,
+                amount: amount,
+                isDebit: debit > 0,
+                rawRow: row
+            });
+        }
+
+        console.log(`[SMART] Extracted ${entries.length} valid GL entries`);
+        return entries;
+    }
+
+    parseExcelDate(value) {
+        if (!value) return null;
+
+        // If it's already a date string, parse it
+        if (typeof value === 'string') {
+            if (this.isValidDate(value)) {
+                return this.parseDate(value);
+            }
+            // Try parsing as number
+            value = parseFloat(value);
+        }
+
+        // Excel serial date number (days since 1900-01-01, with Excel bug for 1900 leap year)
+        if (typeof value === 'number' && value > 30000 && value < 60000) {
+            // Excel epoch is January 1, 1900 (but Excel incorrectly treats 1900 as leap year)
+            // For dates after Feb 28, 1900, we need to subtract 1
+            const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+            const date = new Date(excelEpoch.getTime() + value * 24 * 60 * 60 * 1000);
+            return date;
+        }
+
+        return null;
+    }
+
+    detectGLColumns(headers) {
+        console.log('[DETECT] Analyzing GL column headers...');
+
+        const map = {
+            accountNumber: -1,
+            accountDescription: -1,
+            description: -1,
+            glDescription: -1,
+            type: -1,
+            transactionType: -1,
+            date: -1,
+            refLedger: -1,
+            refNumber: -1,
+            beginBalance: -1,
+            endingBalance: -1,
+            balance: -1,
+            debit: -1,
+            credit: -1,
+            adjustment: -1,
+            debitMinusCredit: -1,
+            amount: -1,
+            netAmount: -1,
+            // Check register specific
+            checkNumber: -1,
+            checkDate: -1,
+            vendor: -1,
+            vendorName: -1,
+            voidAmount: -1,
+            reconciledDate: -1
+        };
+
+        headers.forEach((header, idx) => {
+            const h = String(header).toLowerCase().trim();
+
+            // Account number
+            if ((h.includes('account') && h.includes('number')) || h === 'account no' || h === 'acct no' || h === 'account #') {
+                map.accountNumber = idx;
+            }
+            // Account description (separate from transaction description)
+            else if (h === 'account description' || h === 'acct desc') {
+                map.accountDescription = idx;
+            }
+            // General description
+            else if (h === 'description' || h === 'desc' || h === 'name') {
+                if (map.description === -1) map.description = idx;
+                else map.glDescription = idx;
+            }
+            // Type
+            else if (h === 'type' && map.type === -1) {
+                map.type = idx;
+            }
+            // Transaction type
+            else if (h === 'transaction type' || h === 'trans type' || h === 'txn type') {
+                map.transactionType = idx;
+            }
+            // Date
+            else if (h === 'date' || h === 'trans date' || h === 'transaction date') {
+                map.date = idx;
+            }
+            // Ref Ledger
+            else if (h === 'ref ledger' || h === 'ledger') {
+                map.refLedger = idx;
+            }
+            // Ref Number
+            else if (h === 'ref number' || h === 'ref num' || h === 'reference') {
+                map.refNumber = idx;
+            }
+            // Begin balance
+            else if (h.includes('begin') && h.includes('balance')) {
+                map.beginBalance = idx;
+            }
+            // Ending balance
+            else if ((h.includes('end') && h.includes('balance')) || h === 'ending balance') {
+                map.endingBalance = idx;
+            }
+            // Balance
+            else if (h === 'balance' || h === 'bal') {
+                map.balance = idx;
+            }
+            // Debit
+            else if (h === 'debit' || h === 'dr' || h === 'debits') {
+                map.debit = idx;
+            }
+            // Credit
+            else if (h === 'credit' || h === 'cr' || h === 'credits') {
+                map.credit = idx;
+            }
+            // Adjustment
+            else if (h === 'adjustment' || h === 'adj' || h === 'adjustments') {
+                map.adjustment = idx;
+            }
+            // Debit minus Credit
+            else if (h.includes('debit') && h.includes('credit')) {
+                map.debitMinusCredit = idx;
+            }
+            // Amount
+            else if (h === 'amount' || h === 'amt') {
+                map.amount = idx;
+            }
+            // Net Amount
+            else if (h === 'net amount' || h === 'net amt') {
+                map.netAmount = idx;
+            }
+            // Check register columns
+            else if (h === 'check #' || h === 'check number' || h === 'chk #' || h === 'check num') {
+                map.checkNumber = idx;
+            }
+            else if (h === 'check date' || h === 'chk date') {
+                map.checkDate = idx;
+            }
+            else if (h === 'vendor' || h === 'vendor code' || h === 'vend') {
+                map.vendor = idx;
+            }
+            else if (h === 'vendor name' || h === 'payee' || h === 'pay to') {
+                map.vendorName = idx;
+            }
+            else if (h === 'void amount' || h === 'void amt') {
+                map.voidAmount = idx;
+            }
+            else if (h === 'reconciled date' || h === 'recon date') {
+                map.reconciledDate = idx;
+            }
+        });
+
+        return map;
+    }
+
+    parseDate(dateStr) {
+        if (!dateStr) return null;
+
+        // Handle MM/DD/YYYY format
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+            return new Date(parts[2], parts[0] - 1, parts[1]);
+        }
+
+        return new Date(dateStr);
+    }
+
+    parseAmount(value) {
+        if (!value || value === '' || value === null || value === undefined) return 0;
+
+        // Convert to string
+        let str = String(value).trim();
+
+        // Handle empty strings
+        if (str === '') return 0;
+
+        // Handle text representations like "zero", "none", etc.
+        const lowerStr = str.toLowerCase();
+        if (lowerStr === 'zero' || lowerStr === 'none' || lowerStr === 'n/a' || lowerStr === '-') {
+            return 0;
+        }
+
+        // Remove common currency symbols and text
+        str = str.replace(/[$€£¥₹]/g, '');
+        str = str.replace(/\s+/g, ''); // Remove all whitespace
+
+        // Handle parentheses notation for negative numbers (accounting format)
+        // e.g., "(100.50)" means -100.50
+        const hasParentheses = str.startsWith('(') && str.endsWith(')');
+        if (hasParentheses) {
+            str = str.slice(1, -1); // Remove parentheses
+        }
+
+        // Handle different decimal and thousand separators
+        // European format: 1.234.567,89 or 1 234 567,89
+        // US format: 1,234,567.89
+
+        // Count dots and commas to determine format
+        const dotCount = (str.match(/\./g) || []).length;
+        const commaCount = (str.match(/,/g) || []).length;
+        const dotPos = str.lastIndexOf('.');
+        const commaPos = str.lastIndexOf(',');
+
+        // Determine which is the decimal separator
+        if (commaPos > dotPos) {
+            // European format: comma is decimal separator
+            // Remove dots (thousand separators) and replace comma with dot
+            str = str.replace(/\./g, '').replace(',', '.');
+        } else if (dotPos > commaPos) {
+            // US format: dot is decimal separator
+            // Remove commas (thousand separators)
+            str = str.replace(/,/g, '');
+        } else if (commaCount > 0 && dotCount === 0) {
+            // Only commas, could be European decimal or US thousands
+            // If 2 digits after comma, it's likely decimal
+            const afterComma = str.split(',')[1];
+            if (afterComma && afterComma.length === 2) {
+                str = str.replace(',', '.');
+            } else {
+                str = str.replace(/,/g, '');
+            }
+        }
+
+        // Remove any remaining non-numeric characters except . and -
+        str = str.replace(/[^0-9.-]/g, '');
+
+        // Handle multiple negative signs
+        const negativeCount = (str.match(/-/g) || []).length;
+        const isNegative = negativeCount % 2 === 1; // Odd number of negatives = negative
+        str = str.replace(/-/g, '');
+
+        // Parse the cleaned number
+        let amount = parseFloat(str);
+
+        // Return 0 if parsing failed
+        if (isNaN(amount)) {
+            console.warn(`[PARSE] Could not parse amount: "${value}" -> "${str}"`);
+            return 0;
+        }
+
+        // Apply negative sign if needed
+        if (isNegative || hasParentheses) {
+            amount = -Math.abs(amount);
+        }
+
+        return amount;
+    }
+
+    checkReadyToReconcile() {
+        const btn = document.getElementById('reconcileBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const ready = this.bankData.length > 0 && this.glData.length > 0;
+
+        console.log(`[STATUS] Ready to reconcile: ${ready} (Bank: ${this.bankData.length}, GL: ${this.glData.length})`);
+
+        btn.disabled = !ready;
+
+        if (ready) {
+            btn.style.cursor = 'pointer';
+            statusIndicator.style.display = 'block';
+            statusIndicator.style.background = '#d1fae5';
+            statusIndicator.style.borderColor = '#059669';
+            statusText.textContent = `READY - Bank: ${this.bankData.length} rows, GL: ${this.glData.length} rows`;
+            console.log('[READY] Reconcile button is now ENABLED');
+        } else {
+            btn.style.cursor = 'not-allowed';
+            statusIndicator.style.display = 'block';
+            statusIndicator.style.background = '#fee2e2';
+            statusIndicator.style.borderColor = '#dc2626';
+            console.log('[WAITING] Reconcile button is DISABLED');
+
+            // Show helpful message if user uploaded files but button is still disabled
+            if (this.bankData.length === 0 && this.glData.length === 0) {
+                statusText.textContent = 'Waiting for both files to be uploaded';
+                console.log('[INFO] Waiting for both files to be uploaded...');
+            } else if (this.bankData.length === 0) {
+                statusText.textContent = `Waiting for bank statement file (GL: ${this.glData.length} rows loaded)`;
+                console.log('[INFO] Still need bank statement file');
+                this.showWarning('Bank statement file not loaded', 'Please upload a bank statement CSV file to continue.');
+            } else if (this.glData.length === 0) {
+                statusText.textContent = `Waiting for GL file (Bank: ${this.bankData.length} rows loaded)`;
+                console.log('[INFO] Still need GL file');
+                this.showWarning('General Ledger file not loaded', 'Please upload a general ledger Excel or CSV file to continue.');
+            }
+        }
+    }
+
+    showWarning(title, message) {
+        // Don't auto-show warnings - user can click "Check System Status" button instead
+        console.warn(`[WARNING] ${title}: ${message}`);
+    }
+
+    startReconciliation() {
+        console.log('[START] Starting reconciliation...');
+
+        // Show progress
+        document.getElementById('progressSection').style.display = 'block';
+        document.getElementById('resultsSection').style.display = 'none';
+
+        // Simulate progress for better UX
+        this.updateProgress(30, 'Analyzing bank transactions...');
+
+        setTimeout(() => {
+            this.updateProgress(60, 'Matching with GL entries...');
+
+            setTimeout(() => {
+                this.performReconciliation();
+                this.updateProgress(100, 'Complete!');
+
+                setTimeout(() => {
+                    this.displayResults();
+                }, 500);
+            }, 500);
+        }, 500);
+    }
+
+    performReconciliation() {
+        this.matchedTransactions = [];
+        this.unmatchedBank = [];
+        this.unmatchedGL = [];
+
+        const matchedBankIndices = new Set();
+        const matchedGLIndices = new Set();
+
+        console.log('[MATCH] Starting matching algorithm...');
+
+        // Try to match each bank transaction with GL entries
+        this.bankData.forEach((bankTx, bankIdx) => {
+            let bestMatch = null;
+            let bestMatchScore = 0;
+            let bestGLIdx = -1;
+
+            this.glData.forEach((glEntry, glIdx) => {
+                if (matchedGLIndices.has(glIdx)) return;
+
+                const score = this.calculateMatchScore(bankTx, glEntry);
+
+                if (score > bestMatchScore && score > 0.5) { // Threshold for matching
+                    bestMatchScore = score;
+                    bestMatch = glEntry;
+                    bestGLIdx = glIdx;
+                }
+            });
+
+            if (bestMatch) {
+                matchedBankIndices.add(bankIdx);
+                matchedGLIndices.add(bestGLIdx);
+
+                this.matchedTransactions.push({
+                    bankTransaction: bankTx,
+                    glEntry: bestMatch,
+                    matchScore: bestMatchScore,
+                    matchType: this.getMatchType(bankTx, bestMatch),
+                    isManual: false
+                });
+
+                console.log(`[MATCH] Found: Bank check ${bankTx.checkNumber} ($${bankTx.amount}) -> GL ${bestMatch.accountNumber} ($${bestMatch.amount}) [Score: ${(bestMatchScore * 100).toFixed(0)}%]`);
+            }
+        });
+
+        // Collect unmatched items
+        this.bankData.forEach((tx, idx) => {
+            if (!matchedBankIndices.has(idx)) {
+                this.unmatchedBank.push(tx);
+            }
+        });
+
+        this.glData.forEach((entry, idx) => {
+            if (!matchedGLIndices.has(idx)) {
+                this.unmatchedGL.push(entry);
+            }
+        });
+
+        console.log('[COMPLETE] Reconciliation finished:', {
+            matched: this.matchedTransactions.length,
+            unmatchedBank: this.unmatchedBank.length,
+            unmatchedGL: this.unmatchedGL.length
+        });
+    }
+
+    calculateMatchScore(bankTx, glEntry) {
+        let score = 0;
+        const weights = {
+            amount: 0.5,
+            checkNumber: 0.3,
+            date: 0.2
+        };
+
+        // Amount matching (most important)
+        const bankAmount = Math.abs(bankTx.amount);
+        const glAmount = Math.abs(glEntry.amount);
+        const amountDiff = Math.abs(bankAmount - glAmount);
+
+        if (amountDiff <= this.settings.amountTolerance) {
+            score += weights.amount;
+        } else if (amountDiff < bankAmount * 0.01) { // Within 1%
+            score += weights.amount * 0.8;
+        }
+
+        // Check number matching
+        if (bankTx.checkNumber && glEntry.accountNumber) {
+            const checkNum = bankTx.checkNumber.replace(/\D/g, '');
+            const acctNum = glEntry.accountNumber.replace(/\D/g, '');
+
+            if (checkNum && acctNum.includes(checkNum)) {
+                score += weights.checkNumber;
+            }
+        }
+
+        // Date proximity (if dates are available)
+        if (bankTx.date && this.settings.dateRange > 0) {
+            // For GL, we'll use a general date match since GL might not have transaction dates
+            // This is a placeholder - can be enhanced if GL has date fields
+            score += weights.date * 0.5;
+        }
+
+        return score;
+    }
+
+    getMatchType(bankTx, glEntry) {
+        const types = [];
+
+        if (Math.abs(Math.abs(bankTx.amount) - Math.abs(glEntry.amount)) <= this.settings.amountTolerance) {
+            types.push('Exact Amount');
+        }
+
+        if (bankTx.checkNumber && glEntry.accountNumber &&
+            glEntry.accountNumber.includes(bankTx.checkNumber.replace(/\D/g, ''))) {
+            types.push('Check #');
+        }
+
+        return types.length > 0 ? types.join(' + ') : 'Amount Match';
+    }
+
+    updateProgress(percent, text) {
+        document.getElementById('progressFill').style.width = percent + '%';
+        document.getElementById('progressText').textContent = text;
+    }
+
+    displayResults() {
+        document.getElementById('progressSection').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'block';
+
+        // Update summary cards
+        const totalMatched = this.matchedTransactions.reduce((sum, match) =>
+            sum + Math.abs(match.bankTransaction.amount), 0);
+
+        document.getElementById('matchedCount').textContent = this.matchedTransactions.length;
+        document.getElementById('unmatchedBankCount').textContent = this.unmatchedBank.length;
+        document.getElementById('unmatchedGLCount').textContent = this.unmatchedGL.length;
+        document.getElementById('totalAmount').textContent = this.formatCurrency(totalMatched);
+
+        // Display the current tab
+        this.switchTab(this.currentTab);
+    }
+
+    switchTab(tab) {
+        this.currentTab = tab;
+
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+
+        // Update table based on tab
+        let title, data, headers;
+
+        switch(tab) {
+            case 'matched':
+                title = 'Matched Transactions';
+                data = this.matchedTransactions;
+                headers = ['Bank Date', 'Description', 'Check #', 'Bank Amount', 'GL Account', 'GL Amount', 'Match Type', 'Actions'];
+                this.renderMatchedTable(data, headers);
+                break;
+
+            case 'unmatched-bank':
+                title = 'Unmatched Bank Transactions';
+                data = this.unmatchedBank;
+                headers = ['Date', 'Description', 'Memo', 'Check #', 'Debit', 'Credit', 'Balance', 'Actions'];
+                this.renderUnmatchedBankTable(data, headers);
+                break;
+
+            case 'unmatched-gl':
+                title = 'Unmatched GL Entries';
+                data = this.unmatchedGL;
+                headers = ['Account Number', 'Description', 'Type', 'Begin Balance', 'Ending Balance', 'Adjustment', 'Actions'];
+                this.renderUnmatchedGLTable(data, headers);
+                break;
+        }
+
+        document.getElementById('resultsTitle').textContent = title;
+    }
+
+    renderMatchedTable(data, headers) {
+        const thead = document.getElementById('resultsTableHead');
+        const tbody = document.getElementById('resultsTableBody');
+
+        const newHeaders = ['Bank Date', 'Bank Description', 'Bank Credit', 'GL Account #', 'GL Description', 'GL Debit', 'Match Type', 'Actions'];
+        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+
+        tbody.innerHTML = data.map((match, idx) => {
+            const bank = match.bankTransaction;
+            const gl = match.glEntry;
+            const manualBadge = match.isManual ? '<span class="manual-badge">Manual</span>' : '';
+            const difference = Math.abs(bank.amount - gl.amount);
+            const diffDisplay = difference > 0.01 ? `<span class="diff-badge">Diff: ${this.formatCurrency(difference)}</span>` : '';
+
+            return `
+                <tr>
+                    <td>${this.formatDate(bank.date)}</td>
+                    <td>${this.escapeHtml(bank.description)}</td>
+                    <td class="amount-credit">${this.formatCurrency(bank.amount)}</td>
+                    <td>${this.escapeHtml(gl.accountNumber)}</td>
+                    <td>${this.escapeHtml(gl.description)}</td>
+                    <td class="amount-debit">${this.formatCurrency(gl.amount)}</td>
+                    <td>
+                        <span class="match-status matched">${this.escapeHtml(match.matchType)}</span>
+                        ${manualBadge}
+                        ${diffDisplay}
+                    </td>
+                    <td>
+                        <button class="action-btn unmatch-btn" data-action="unmatch" data-idx="${idx}">Unmatch</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Attach event listeners to Unmatch buttons
+        tbody.querySelectorAll('[data-action="unmatch"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.idx);
+                this.unmatchTransaction(idx);
+            });
+        });
+    }
+
+    renderUnmatchedBankTable(data, headers) {
+        const thead = document.getElementById('resultsTableHead');
+        const tbody = document.getElementById('resultsTableBody');
+
+        const newHeaders = ['Date', 'Description', 'Credit Amount', 'Balance', 'Actions'];
+        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+
+        tbody.innerHTML = data.map((tx, idx) => `
+            <tr>
+                <td>${this.formatDate(tx.date)}</td>
+                <td>${this.escapeHtml(tx.description)}</td>
+                <td class="amount-credit">${this.formatCurrency(tx.amountCredit)}</td>
+                <td>${this.formatCurrency(tx.balance)}</td>
+                <td>
+                    <button class="action-btn match-btn" data-action="find-match" data-type="bank" data-idx="${idx}">Find Match</button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Attach event listeners to Find Match buttons
+        tbody.querySelectorAll('[data-action="find-match"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.dataset.type;
+                const idx = parseInt(btn.dataset.idx);
+                this.showManualMatch(type, idx);
+            });
+        });
+    }
+
+    renderUnmatchedGLTable(data, headers) {
+        const thead = document.getElementById('resultsTableHead');
+        const tbody = document.getElementById('resultsTableBody');
+
+        const newHeaders = ['Account Number', 'Description', 'Type', 'Debit Amount', 'Actions'];
+        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+
+        tbody.innerHTML = data.map((entry, idx) => `
+            <tr>
+                <td>${this.escapeHtml(entry.accountNumber)}</td>
+                <td>${this.escapeHtml(entry.description)}</td>
+                <td>${this.escapeHtml(entry.type)}</td>
+                <td class="amount-debit">${this.formatCurrency(entry.debit)}</td>
+                <td>
+                    <button class="action-btn match-btn" data-action="find-match" data-type="gl" data-idx="${idx}">Find Match</button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Attach event listeners to Find Match buttons
+        tbody.querySelectorAll('[data-action="find-match"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.dataset.type;
+                const idx = parseInt(btn.dataset.idx);
+                this.showManualMatch(type, idx);
+            });
+        });
+    }
+
+    unmatchTransaction(matchIdx) {
+        if (!confirm('Are you sure you want to unmatch this transaction?')) return;
+
+        const match = this.matchedTransactions[matchIdx];
+
+        // Add back to unmatched arrays
+        this.unmatchedBank.push(match.bankTransaction);
+        this.unmatchedGL.push(match.glEntry);
+
+        // Remove from matched
+        this.matchedTransactions.splice(matchIdx, 1);
+
+        console.log('[UNMATCH] Transaction unmatched');
+
+        // Refresh display
+        this.displayResults();
+    }
+
+    showManualMatch(sourceType, sourceIdx) {
+        const modal = document.getElementById('manualMatchModal');
+        const list = document.getElementById('matchCandidatesList');
+
+        // Store current selection
+        this.manualMatchSource = { type: sourceType, idx: sourceIdx };
+
+        // Get the source item
+        const sourceItem = sourceType === 'bank' ? this.unmatchedBank[sourceIdx] : this.unmatchedGL[sourceIdx];
+        const targetItems = sourceType === 'bank' ? this.unmatchedGL : this.unmatchedBank;
+
+        // Update modal title with clearer context
+        if (sourceType === 'bank') {
+            const title = `Find GL Match for Bank Credit`;
+            document.getElementById('manualMatchTitle').textContent = title;
+            document.getElementById('manualMatchSourceInfo').innerHTML = `
+                <div class="source-info bank-source">
+                    <strong>Bank Transaction:</strong> ${this.escapeHtml(sourceItem.description)}<br>
+                    <strong>Date:</strong> ${this.formatDate(sourceItem.date)}<br>
+                    <strong>Credit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceItem.amount)}</span>
+                </div>
+            `;
+        } else {
+            const title = `Find Bank Match for GL Debit`;
+            document.getElementById('manualMatchTitle').textContent = title;
+            document.getElementById('manualMatchSourceInfo').innerHTML = `
+                <div class="source-info gl-source">
+                    <strong>GL Entry:</strong> ${this.escapeHtml(sourceItem.accountNumber)} - ${this.escapeHtml(sourceItem.description)}<br>
+                    <strong>Type:</strong> ${this.escapeHtml(sourceItem.type)}<br>
+                    <strong>Debit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceItem.amount)}</span>
+                </div>
+            `;
+        }
+
+        // Populate candidates with better formatting and sorting
+        const sourceAmount = sourceItem.amount;
+
+        // Sort candidates by amount similarity
+        const sortedTargets = targetItems.map((item, idx) => ({
+            item,
+            idx,
+            diff: Math.abs(item.amount - sourceAmount)
+        })).sort((a, b) => a.diff - b.diff);
+
+        list.innerHTML = sortedTargets.map(({item, idx, diff}) => {
+            const matchQuality = diff === 0 ? 'exact-match' : diff < sourceAmount * 0.01 ? 'close-match' : '';
+            const diffBadge = diff > 0.01 ? `<span class="diff-indicator">Diff: ${this.formatCurrency(diff)}</span>` : '<span class="exact-indicator">Exact Match</span>';
+
+            let itemDesc = '';
+            if (sourceType === 'bank') {
+                // Showing GL items
+                itemDesc = `
+                    <div class="candidate-main">
+                        <strong>${this.escapeHtml(item.accountNumber)}</strong> - ${this.escapeHtml(item.description)}
+                    </div>
+                    <div class="candidate-details">
+                        <span class="candidate-amount">${this.formatCurrency(item.amount)}</span>
+                        ${diffBadge}
+                    </div>
+                `;
+            } else {
+                // Showing Bank items
+                itemDesc = `
+                    <div class="candidate-main">
+                        <strong>${this.formatDate(item.date)}</strong> - ${this.escapeHtml(item.description)}
+                    </div>
+                    <div class="candidate-details">
+                        <span class="candidate-amount">${this.formatCurrency(item.amount)}</span>
+                        ${diffBadge}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="match-candidate ${matchQuality}" data-candidate-idx="${idx}">
+                    <input type="radio" name="manualMatch" value="${idx}" id="match_${idx}">
+                    <label for="match_${idx}">
+                        ${itemDesc}
+                    </label>
+                </div>
+            `;
+        }).join('');
+
+        if (sortedTargets.length === 0) {
+            list.innerHTML = '<p class="no-matches">No available items to match with. All items may already be matched.</p>';
+        }
+
+        // Attach event listeners to match candidates
+        list.querySelectorAll('.match-candidate').forEach(candidate => {
+            candidate.addEventListener('click', () => {
+                const idx = parseInt(candidate.dataset.candidateIdx);
+                this.selectManualMatch(idx);
+            });
+        });
+
+        modal.style.display = 'flex';
+    }
+
+    selectManualMatch(targetIdx) {
+        const radio = document.querySelector(`input[name="manualMatch"][value="${targetIdx}"]`);
+        if (radio) radio.checked = true;
+    }
+
+    confirmManualMatch() {
+        const selected = document.querySelector('input[name="manualMatch"]:checked');
+        if (!selected) {
+            alert('Please select an item to match');
+            return;
+        }
+
+        const targetIdx = parseInt(selected.value);
+        const source = this.manualMatchSource;
+
+        let bankItem, glItem;
+
+        if (source.type === 'bank') {
+            bankItem = this.unmatchedBank[source.idx];
+            glItem = this.unmatchedGL[targetIdx];
+
+            // Remove from unmatched
+            this.unmatchedBank.splice(source.idx, 1);
+            this.unmatchedGL.splice(targetIdx, 1);
+        } else {
+            glItem = this.unmatchedGL[source.idx];
+            bankItem = this.unmatchedBank[targetIdx];
+
+            // Remove from unmatched
+            this.unmatchedGL.splice(source.idx, 1);
+            this.unmatchedBank.splice(targetIdx, 1);
+        }
+
+        // Add to matched
+        this.matchedTransactions.push({
+            bankTransaction: bankItem,
+            glEntry: glItem,
+            matchScore: 1.0,
+            matchType: 'Manual Match',
+            isManual: true
+        });
+
+        console.log('[MANUAL] Manual match created');
+
+        this.closeManualMatchModal();
+        this.displayResults();
+    }
+
+    createCustomMatch(customData) {
+        const source = this.manualMatchSource;
+        if (!source) {
+            console.error('[CUSTOM] No source item set');
+            return;
+        }
+
+        let bankItem, glItem;
+
+        if (source.type === 'bank') {
+            // Source is bank, create custom GL entry
+            bankItem = this.unmatchedBank[source.idx];
+            glItem = {
+                accountNumber: customData.accountNumber || 'CUSTOM',
+                description: customData.description,
+                type: customData.type,
+                beginBalance: 0,
+                endingBalance: 0,
+                debit: customData.amount,
+                amount: customData.amount,
+                notes: customData.notes,
+                isCustom: true,
+                customDate: customData.date
+            };
+
+            // Remove source from unmatched
+            this.unmatchedBank.splice(source.idx, 1);
+        } else {
+            // Source is GL, create custom bank entry
+            glItem = this.unmatchedGL[source.idx];
+            bankItem = {
+                transactionNumber: customData.accountNumber || 'CUSTOM',
+                date: customData.date,
+                description: customData.description,
+                memo: customData.notes || '',
+                amountCredit: customData.amount,
+                amountDebit: 0,
+                balance: 0,
+                checkNumber: customData.accountNumber || '',
+                amount: customData.amount,
+                isCustom: true
+            };
+
+            // Remove source from unmatched
+            this.unmatchedGL.splice(source.idx, 1);
+        }
+
+        // Add to matched
+        this.matchedTransactions.push({
+            bankTransaction: bankItem,
+            glEntry: glItem,
+            matchScore: 1.0,
+            matchType: `Custom ${customData.type.charAt(0).toUpperCase() + customData.type.slice(1)}`,
+            isManual: true,
+            isCustom: true,
+            customNotes: customData.notes
+        });
+
+        console.log('[CUSTOM] Custom match created:', customData);
+
+        this.displayResults();
+    }
+
+    closeManualMatchModal() {
+        document.getElementById('manualMatchModal').style.display = 'none';
+    }
+
+    showDebugInfo() {
+        const modal = document.getElementById('debugModal');
+        const content = document.getElementById('debugModalContent');
+
+        const status = this.getSystemStatus();
+
+        let html = '<div class="debug-info">';
+
+        // Overall Status
+        html += `<div class="debug-section ${status.canReconcile ? 'status-good' : 'status-bad'}">`;
+        html += `<h3>${status.canReconcile ? '[READY]' : '[NOT READY]'} Ready to Reconcile: ${status.canReconcile ? 'YES' : 'NO'}</h3>`;
+        html += '</div>';
+
+        // Bank Data Status
+        html += '<div class="debug-section">';
+        html += '<h4>Bank Statement Data</h4>';
+        html += `<p><strong>Status:</strong> ${status.bankStatus}</p>`;
+        html += `<p><strong>Rows Loaded:</strong> ${this.bankData.length}</p>`;
+        if (this.bankData.length > 0) {
+            html += '<p><strong>Sample Transaction:</strong></p>';
+            html += '<pre>' + JSON.stringify(this.bankData[0], null, 2) + '</pre>';
+        } else {
+            html += '<p class="warning">WARNING: No bank transactions loaded. Please upload a CSV file.</p>';
+        }
+        html += '</div>';
+
+        // GL Data Status
+        html += '<div class="debug-section">';
+        html += '<h4>General Ledger Data</h4>';
+        html += `<p><strong>Status:</strong> ${status.glStatus}</p>`;
+        html += `<p><strong>Rows Loaded:</strong> ${this.glData.length}</p>`;
+        if (this.glData.length > 0) {
+            html += '<p><strong>Sample Entry:</strong></p>';
+            html += '<pre>' + JSON.stringify(this.glData[0], null, 2) + '</pre>';
+        } else {
+            html += '<p class="warning">WARNING: No GL entries loaded. Please upload an Excel or CSV file.</p>';
+        }
+        html += '</div>';
+
+        // Button Status
+        html += '<div class="debug-section">';
+        html += '<h4>Reconcile Button Status</h4>';
+        const btn = document.getElementById('reconcileBtn');
+        html += `<p><strong>Disabled:</strong> ${btn.disabled}</p>`;
+        html += `<p><strong>Should be enabled:</strong> ${this.bankData.length > 0 && this.glData.length > 0}</p>`;
+        html += '</div>';
+
+        // Settings
+        html += '<div class="debug-section">';
+        html += '<h4>Current Settings</h4>';
+        html += `<p><strong>Date Range:</strong> ±${this.settings.dateRange} days</p>`;
+        html += `<p><strong>Amount Tolerance:</strong> $${this.settings.amountTolerance}</p>`;
+        html += '</div>';
+
+        // Errors/Warnings
+        if (status.errors.length > 0) {
+            html += '<div class="debug-section status-bad">';
+            html += '<h4>ERRORS</h4>';
+            html += '<ul>';
+            status.errors.forEach(err => {
+                html += `<li>${err}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        if (status.warnings.length > 0) {
+            html += '<div class="debug-section status-warning">';
+            html += '<h4>WARNINGS</h4>';
+            html += '<ul>';
+            status.warnings.forEach(warn => {
+                html += `<li>${warn}</li>`;
+            });
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        // Action Items
+        if (!status.canReconcile) {
+            html += '<div class="debug-section status-warning">';
+            html += '<h4>Action Items</h4>';
+            html += '<ul>';
+            if (this.bankData.length === 0) {
+                html += '<li>Upload a bank statement CSV file</li>';
+            }
+            if (this.glData.length === 0) {
+                html += '<li>Upload a general ledger Excel or CSV file</li>';
+            }
+            html += '</ul>';
+            html += '</div>';
+        }
+
+        html += '</div>';
+
+        content.innerHTML = html;
+        modal.style.display = 'flex';
+    }
+
+    getSystemStatus() {
+        const status = {
+            canReconcile: false,
+            bankStatus: 'Not loaded',
+            glStatus: 'Not loaded',
+            errors: [],
+            warnings: []
+        };
+
+        // Check bank data
+        if (this.bankData.length === 0) {
+            status.errors.push('No bank statement data loaded');
+            status.bankStatus = '[ERROR] No data';
+        } else {
+            status.bankStatus = `[OK] ${this.bankData.length} transactions loaded`;
+
+            // Validate bank data structure
+            const sample = this.bankData[0];
+            if (!sample.amount && sample.amount !== 0) {
+                status.warnings.push('Bank transactions may have invalid amounts');
+            }
+            if (!sample.date) {
+                status.warnings.push('Bank transactions may be missing dates');
+            }
+        }
+
+        // Check GL data
+        if (this.glData.length === 0) {
+            status.errors.push('No general ledger data loaded');
+            status.glStatus = '[ERROR] No data';
+        } else {
+            status.glStatus = `[OK] ${this.glData.length} entries loaded`;
+
+            // Validate GL data structure
+            const sample = this.glData[0];
+            if (!sample.amount && sample.amount !== 0) {
+                status.warnings.push('GL entries may have invalid amounts');
+            }
+            if (!sample.accountNumber) {
+                status.warnings.push('GL entries may be missing account numbers');
+            }
+        }
+
+        // Overall status
+        status.canReconcile = this.bankData.length > 0 && this.glData.length > 0;
+
+        return status;
+    }
+
+    closeDebugModal() {
+        document.getElementById('debugModal').style.display = 'none';
+    }
+
+    applyFilters() {
+        // This will filter the currently displayed data
+        this.switchTab(this.currentTab);
+    }
+
+    clearFilters() {
+        this.filters = {
+            dateFrom: null,
+            dateTo: null,
+            amountMin: null,
+            amountMax: null,
+            searchText: ''
+        };
+
+        document.getElementById('dateFrom').value = '';
+        document.getElementById('dateTo').value = '';
+        document.getElementById('amountMin').value = '';
+        document.getElementById('amountMax').value = '';
+        document.getElementById('searchText').value = '';
+
+        this.applyFilters();
+    }
+
+    printReport() {
+        window.print();
+    }
+
+    exportToExcel() {
+        const wb = XLSX.utils.book_new();
+
+        // Matched transactions sheet
+        const matchedData = this.matchedTransactions.map(match => ({
+            'Bank Date': this.formatDate(match.bankTransaction.date),
+            'Description': match.bankTransaction.description,
+            'Check Number': match.bankTransaction.checkNumber,
+            'Bank Amount': match.bankTransaction.amount,
+            'GL Account': match.glEntry.accountNumber,
+            'GL Description': match.glEntry.description,
+            'GL Amount': match.glEntry.amount,
+            'Match Type': match.matchType,
+            'Manual': match.isManual ? 'Yes' : 'No'
+        }));
+        const wsMatched = XLSX.utils.json_to_sheet(matchedData);
+        XLSX.utils.book_append_sheet(wb, wsMatched, 'Matched');
+
+        // Unmatched bank sheet
+        const unmatchedBankData = this.unmatchedBank.map(tx => ({
+            'Date': this.formatDate(tx.date),
+            'Description': tx.description,
+            'Memo': tx.memo,
+            'Check Number': tx.checkNumber,
+            'Debit': tx.amountDebit,
+            'Credit': tx.amountCredit,
+            'Balance': tx.balance
+        }));
+        const wsUnmatchedBank = XLSX.utils.json_to_sheet(unmatchedBankData);
+        XLSX.utils.book_append_sheet(wb, wsUnmatchedBank, 'Unmatched Bank');
+
+        // Unmatched GL sheet
+        const unmatchedGLData = this.unmatchedGL.map(entry => ({
+            'Account Number': entry.accountNumber,
+            'Description': entry.description,
+            'Type': entry.type,
+            'Begin Balance': entry.beginBalance,
+            'Ending Balance': entry.endingBalance,
+            'Adjustment': entry.adjustment
+        }));
+        const wsUnmatchedGL = XLSX.utils.json_to_sheet(unmatchedGLData);
+        XLSX.utils.book_append_sheet(wb, wsUnmatchedGL, 'Unmatched GL');
+
+        // Save file
+        XLSX.writeFile(wb, `Reconciliation_${this.formatDateFilename(new Date())}.xlsx`);
+    }
+
+    exportToCSV() {
+        let csv = '';
+
+        switch(this.currentTab) {
+            case 'matched':
+                csv = this.generateMatchedCSV();
+                break;
+            case 'unmatched-bank':
+                csv = this.generateUnmatchedBankCSV();
+                break;
+            case 'unmatched-gl':
+                csv = this.generateUnmatchedGLCSV();
+                break;
+        }
+
+        this.downloadCSV(csv, `${this.currentTab}_${this.formatDateFilename(new Date())}.csv`);
+    }
+
+    generateMatchedCSV() {
+        const headers = ['Bank Date', 'Description', 'Check Number', 'Bank Amount', 'GL Account', 'GL Description', 'GL Amount', 'Match Type', 'Manual'];
+        const rows = this.matchedTransactions.map(match => [
+            this.formatDate(match.bankTransaction.date),
+            match.bankTransaction.description,
+            match.bankTransaction.checkNumber,
+            match.bankTransaction.amount,
+            match.glEntry.accountNumber,
+            match.glEntry.description,
+            match.glEntry.amount,
+            match.matchType,
+            match.isManual ? 'Yes' : 'No'
+        ]);
+
+        return Papa.unparse({ fields: headers, data: rows });
+    }
+
+    generateUnmatchedBankCSV() {
+        const headers = ['Date', 'Description', 'Memo', 'Check Number', 'Debit', 'Credit', 'Balance'];
+        const rows = this.unmatchedBank.map(tx => [
+            this.formatDate(tx.date),
+            tx.description,
+            tx.memo,
+            tx.checkNumber,
+            tx.amountDebit,
+            tx.amountCredit,
+            tx.balance
+        ]);
+
+        return Papa.unparse({ fields: headers, data: rows });
+    }
+
+    generateUnmatchedGLCSV() {
+        const headers = ['Account Number', 'Description', 'Type', 'Begin Balance', 'Ending Balance', 'Adjustment'];
+        const rows = this.unmatchedGL.map(entry => [
+            entry.accountNumber,
+            entry.description,
+            entry.type,
+            entry.beginBalance,
+            entry.endingBalance,
+            entry.adjustment
+        ]);
+
+        return Papa.unparse({ fields: headers, data: rows });
+    }
+
+    downloadCSV(csv, filename) {
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    formatCurrency(value) {
+        if (value === 0 || value === null || value === undefined) return '$0.00';
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD'
+        }).format(value);
+    }
+
+    formatDate(date) {
+        if (!date) return '';
+        if (!(date instanceof Date)) date = new Date(date);
+        return date.toLocaleDateString('en-US');
+    }
+
+    formatDateFilename(date) {
+        return date.toISOString().split('T')[0];
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    reset() {
+        if (!confirm('Are you sure you want to reset? All data and matches will be cleared.')) return;
+
+        this.bankData = [];
+        this.glData = [];
+        this.matchedTransactions = [];
+        this.unmatchedBank = [];
+        this.unmatchedGL = [];
+        this.manualMatches = [];
+        this.bankFileName = '';
+        this.glFileName = '';
+
+        document.getElementById('bankFile').value = '';
+        document.getElementById('glFile').value = '';
+        document.getElementById('bankFileName').textContent = 'No file selected';
+        document.getElementById('glFileName').textContent = 'No file selected';
+        document.getElementById('bankFileName').style.color = '';
+        document.getElementById('glFileName').style.color = '';
+        document.getElementById('reconcileBtn').disabled = true;
+
+        document.getElementById('progressSection').style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'none';
+
+        // Reset status indicator
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        if (statusIndicator) {
+            statusIndicator.style.display = 'block';
+            statusIndicator.style.background = '#fee2e2';
+            statusIndicator.style.borderColor = '#dc2626';
+        }
+        if (statusText) {
+            statusText.textContent = 'Waiting for both files to be uploaded';
+        }
+
+        this.clearFilters();
+
+        console.log('[RESET] Application reset');
+    }
+}
+
+// Initialize the application when DOM is loaded
+let app;
+document.addEventListener('DOMContentLoaded', () => {
+    app = new BankReconciliation();
+});
