@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Claude Code settings
+.claude/
+
 # Environment variables
 .env
 .env.local
