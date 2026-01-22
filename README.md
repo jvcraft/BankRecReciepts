@@ -1,144 +1,215 @@
 # Municipal Bank Reconciliation System
 
-A browser-based bank reconciliation tool designed for municipal accounting. Compare bank statements with general ledger entries and automatically match transactions.
+A full-stack bank reconciliation tool designed for municipal accounting. Compare bank statements with general ledger entries, automatically match transactions, and maintain history of reconciliations.
 
 ## Features
 
-- **File Support**: Upload CSV (.csv) or Excel (xlsx) files to be analyzed
+- **User Authentication**: Firebase Authentication with email/password
+- **Persistent History**: Save and load reconciliation sessions via Firestore
+- **File Support**: Upload CSV, Excel, PDF, OFX, and QIF files
 - **Smart Parsing**: Automatically handles:
-  - Relevant numbers (i.e. text formatted or numericals)
+  - Text-formatted numbers and numericals
   - Multiple currency formats ($, €, £, etc.)
   - Accounting notation (parentheses for negatives)
-  - Various date formats
-  - Different file structures (Excel or Comma-Separated supported)
+  - Various date formats including Excel serial dates
+  - Bank export formats with timestamps
 - **Smart Matching**: Automatically matches bank credits to GL debits by:
   - Exact amount matching
   - Date proximity (configurable range)
   - Amount tolerance
-- **Enhanced Manual Matching**: Intuitive modal interface with:
-  - Candidates sorted by amount similarity
-  - Visual indicators for exact and close matches
-  - Clear source and target information
-- **Visual Dashboard**: See matched and unmatched transactions at a glance
+  - Check number matching
+- **Manual & Custom Matching**: Create custom entries or match existing items
+- **Dark Mode**: Full dark theme support with system preference detection
 - **Export Options**: Export results to Excel or CSV
-- **Municipal-Focused**: Clean, professional interface designed for government accounting
 
-## How to Use
+## Quick Start
 
-### Step 1: Open the Application
-Run the program in any web browser (Firefox, Chrome, Edge, etc.)
+### Prerequisites
 
-### Step 2: Upload Files
-1. **Bank Statement**: Upload your CSV or Excel file (.xlsx, .xls, .csv)
-2. **General Ledger**: Upload your Excel or CSV file (.xlsx, .xls, .csv)
+- Node.js 18 or higher
+- Firebase project with Firestore and Authentication enabled
 
-**Note**: The system automatically detects file formats and handles:
-- Text-formatted numbers (no need to convert to numeric format)
-- Various decimal separators (commas or periods)
-- Currency symbols and formatting
-- Different header row positions
+### Local Development
 
-### Step 3: Configure Settings
-- **Date Range**: Set how many days before/after to look for matches (default: ±3 days)
-- **Amount Tolerance**: Allow small differences in amounts (default: $0.00 for exact match)
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/jvcraft/BankRecReciepts.git
+   cd BankRecReciepts
+   ```
 
-### Step 4: Reconcile
-Click "Start Reconciliation" to begin the matching process.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-### Step 5: Review Results
-The dashboard shows:
-- **Matched Transactions**: Bank credits matched with GL debits
-  - Shows both bank and GL information side-by-side
-  - Displays match type and any amount differences
-  - Manual matches are clearly labeled
-- **Unmatched Bank Items**: Bank credits not yet matched with GL
-  - Click "Find Match" to manually select a GL debit
-- **Unmatched GL Items**: GL debits not yet matched with bank
-  - Click "Find Match" to manually select a bank credit
-- **Total Matched Amount**: Sum of all successfully matched transactions
+3. Configure environment:
+   ```bash
+   cp .env.example .env
+   ```
 
-### Step 6: Manual Matching
-When you click "Find Match" on an unmatched item:
-1. A modal opens showing the source item details
-2. Available matches are displayed, sorted by amount similarity
-3. Exact matches are highlighted in green
-4. Close matches (within 1%) are highlighted in yellow
-5. Select the correct match and click "Confirm Match"
+   Edit `.env` and add your Firebase credentials (see Configuration section below).
 
-### Step 7: Export
-- Click "Export to Excel" for a comprehensive workbook with all three sheets
-- Click "Export to CSV" to export the currently viewed tab
-- Click "Print" for a print-friendly report
+4. Configure client-side Firebase:
+   - Edit `public/js/auth.js` and `public/login.html`
+   - Replace `YOUR_API_KEY`, `YOUR_PROJECT_ID`, etc. with your Firebase Web App credentials
 
-## File Format Requirements
+5. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-### Bank Statement CSV
-Expected columns:
-- Transaction Number
-- Date (MM/DD/YYYY format)
-- Description
-- Memo
-- Amount Debit
-- Amount Credit
-- Balance
-- Check Number
-- Fees
+6. Open http://localhost:3000 in your browser
 
-### General Ledger Excel/CSV
-Expected columns:
-- Account Number
-- Description
-- Type
-- Begin Balance
-- Ending Balance
-- ADJUSTMENT (the amount to reconcile)
+## Configuration
 
-## Matching Logic
+### Server-Side (`.env` file)
 
-The system uses a weighted scoring algorithm:
+```env
+# Server
+PORT=3000
+NODE_ENV=development
 
-1. **Amount Matching (50% weight)**
-   - Exact amount match gets full points
-   - Within 1% gets 80% of points
-   - Respects amount tolerance setting
+# Production URL
+APP_URL=https://yourdomain.com
 
-2. **Check Number (30% weight)**
-   - Matches check numbers from bank against account numbers in GL
+# CORS (comma-separated origins for production)
+ALLOWED_ORIGINS=https://yourdomain.com
 
-3. **Date Proximity (20% weight)**
-   - Transactions within the date range get points
-   - Configurable from 0-30 days
+# Firebase Admin SDK (from Firebase Console > Project Settings > Service Accounts)
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=your-service-account@your-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
-Transactions with a match score above 50% are considered matched.
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+```
 
-## Tips for Best Results
+### Client-Side (`public/js/auth.js` and `public/login.html`)
 
-- Ensure dates are in MM/DD/YYYY format in CSV files
-- Use a date range of 3-5 days for most municipal reconciliations
-- Start with $0.00 amount tolerance, increase only if needed
-- Review unmatched items carefully - they may need manual investigation
-- Export results before starting a new reconciliation
+Get these from Firebase Console > Project Settings > General > Your apps > Web app:
 
-## Technical Details
+```javascript
+const firebaseConfig = {
+    apiKey: "your-api-key",
+    authDomain: "your-project.firebaseapp.com",
+    projectId: "your-project-id",
+    storageBucket: "your-project.firebasestorage.app",
+    messagingSenderId: "123456789",
+    appId: "1:123456789:web:abcdef",
+    measurementId: "G-XXXXXXX"
+};
+```
 
-- **Client-Side Only**: All processing happens in your browser, files never uploaded to a server
-- **Libraries Used**:
-  - PapaParse: CSV parsing
-  - SheetJS (xlsx): Excel file reading and writing
-- **Browser Compatibility**: Works on all modern browsers (Chrome, Firefox, Edge, Safari)
-- **No Dependencies**: No Node.js or server installation required
+## Production Deployment
 
-## Privacy & Security
+### Option 1: Docker
 
-- All data processing occurs locally in your browser
-- Files are never uploaded to any server
-- No data is stored or transmitted over the internet
-- Safe for confidential municipal financial data
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
 
-## Support
+# Or build manually
+docker build -t bank-reconciliation .
+docker run -p 3000:3000 --env-file .env bank-reconciliation
+```
 
-For issues or questions, please contact your IT department or the developer.
+### Option 2: Render.com
+
+1. Connect your GitHub repository to Render
+2. Create a new Web Service
+3. Set environment variables in the Render dashboard
+4. Deploy automatically on push
+
+### Option 3: Railway
+
+1. Connect GitHub repository
+2. Railway will auto-detect the configuration from `railway.json`
+3. Add environment variables in the Railway dashboard
+
+### Option 4: Fly.io
+
+```bash
+# Install Fly CLI and authenticate
+fly auth login
+
+# Launch the app (first time)
+fly launch
+
+# Deploy updates
+fly deploy
+
+# Set secrets
+fly secrets set FIREBASE_PROJECT_ID=your-project-id
+fly secrets set FIREBASE_CLIENT_EMAIL=your-email
+fly secrets set FIREBASE_PRIVATE_KEY="your-key"
+```
+
+### Option 5: Traditional VPS
+
+1. Clone the repository on your server
+2. Install Node.js 18+
+3. Install PM2: `npm install -g pm2`
+4. Configure environment variables
+5. Start with PM2:
+   ```bash
+   pm2 start npm --name "bank-rec" -- run start:prod
+   pm2 save
+   pm2 startup
+   ```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/ready` | GET | Readiness check (tests DB connection) |
+| `/api/auth/profile` | GET/POST/DELETE | User profile management |
+| `/api/reconciliation/save` | POST | Save reconciliation |
+| `/api/reconciliation/:id` | GET/PUT | Load/update reconciliation |
+| `/api/reconciliation/parse` | POST | Parse uploaded file (PDF/OFX/QIF) |
+| `/api/history` | GET | Get reconciliation history |
+| `/api/history/:id` | DELETE | Delete reconciliation |
+| `/api/settings` | GET/PUT | User settings |
+
+## File Format Support
+
+### Bank Statements
+- CSV with standard columns
+- Excel (.xlsx, .xls)
+- PDF (parsed server-side)
+- OFX/QFX (Open Financial Exchange)
+- QIF (Quicken Interchange Format)
+
+### General Ledger
+- CSV or Excel with account number, description, type, and amounts
+
+## Security Features
+
+- Helmet.js for HTTP security headers
+- Rate limiting on API endpoints
+- CORS protection for production
+- Firebase Authentication
+- Environment-based configuration
+- Non-root Docker user
+
+## Development
+
+```bash
+# Start development server with auto-reload
+npm run dev
+
+# Run tests
+npm test
+
+# Check health endpoint
+curl http://localhost:3000/api/health
+```
 
 ## Version
 
-Version 1.0 - January 2026
+Version 2.0 - January 2026
+
+## License
+
+MIT License

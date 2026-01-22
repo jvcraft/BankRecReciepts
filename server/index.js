@@ -4,6 +4,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 
 const authRoutes = require('./routes/auth');
 const reconciliationRoutes = require('./routes/reconciliation');
@@ -13,6 +15,32 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Trust proxy for cloud deployments (required for rate limiting behind reverse proxy)
+if (isProduction) {
+    app.set('trust proxy', 1);
+}
+
+// Compression for production
+if (isProduction) {
+    app.use(compression());
+}
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP
+    message: {
+        error: 'Too many requests',
+        message: 'You have exceeded the rate limit. Please try again later.'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => !isProduction && req.path.startsWith('/api/') === false
+});
+
+app.use('/api/', limiter);
 
 // Security middleware
 app.use(helmet({
@@ -48,15 +76,18 @@ app.use(helmet({
 }));
 
 // CORS configuration
-app.use(cors({
-    origin: process.env.NODE_ENV === 'production'
-        ? process.env.ALLOWED_ORIGINS?.split(',')
+const corsOptions = {
+    origin: isProduction
+        ? (process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [])
         : true,
-    credentials: true
-}));
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
 
 // Logging
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(morgan(isProduction ? 'combined' : 'dev'));
 
 // Body parsing
 app.use(express.json({ limit: '50mb' }));
@@ -71,13 +102,28 @@ app.use('/api/reconciliation', reconciliationRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/settings', settingsRoutes);
 
-// Health check endpoint
+// Health check endpoint (for load balancers and monitoring)
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        version: require('../package.json').version
+        version: require('../package.json').version,
+        environment: process.env.NODE_ENV || 'development'
     });
+});
+
+// Readiness check (for Kubernetes/cloud deployments)
+app.get('/api/ready', async (req, res) => {
+    try {
+        // Check Firebase connection
+        const { db } = require('./config/firebase');
+        if (db) {
+            await db.collection('_health').doc('check').get();
+        }
+        res.json({ ready: true });
+    } catch (error) {
+        res.status(503).json({ ready: false, error: 'Database not ready' });
+    }
 });
 
 // Serve index.html for SPA routes
@@ -88,15 +134,40 @@ app.get('*', (req, res) => {
 // Error handling
 app.use(errorHandler);
 
+// Graceful shutdown handling
+const gracefulShutdown = (signal) => {
+    console.log(`\n[SERVER] ${signal} received. Shutting down gracefully...`);
+    server.close(() => {
+        console.log('[SERVER] HTTP server closed.');
+        process.exit(0);
+    });
+
+    // Force close after 10 seconds
+    setTimeout(() => {
+        console.error('[SERVER] Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+    }, 10000);
+};
+
 // Start server
-app.listen(PORT, () => {
-    console.log(`
+const server = app.listen(PORT, () => {
+    const env = process.env.NODE_ENV || 'development';
+    if (isProduction) {
+        console.log(`[SERVER] Municipal Bank Reconciliation System started`);
+        console.log(`[SERVER] Port: ${PORT} | Environment: ${env}`);
+    } else {
+        console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║     Municipal Bank Reconciliation System                   ║
 ║     Server running on http://localhost:${PORT}                ║
-║     Environment: ${process.env.NODE_ENV || 'development'}                          ║
+║     Environment: ${env}                          ║
 ╚════════════════════════════════════════════════════════════╝
-    `);
+        `);
+    }
 });
+
+// Handle shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;
