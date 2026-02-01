@@ -3,8 +3,7 @@
  * Handles Firebase Authentication and session management
  */
 
-// Firebase configuration - Replace with your own Firebase project credentials
-// Get these from Firebase Console > Project Settings > General > Your apps > Web app
+// Firebase configuration
 const firebaseConfig = {
     apiKey: "YOUR_API_KEY",
     authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
@@ -72,6 +71,11 @@ class AuthManager {
                 } else {
                     this.token = null;
                     console.log('[AUTH] User signed out');
+
+                    // Redirect to home if on app page and not in demo mode
+                    if (window.location.pathname === '/app' && !this.demoMode) {
+                        window.location.href = '/home.html';
+                    }
                 }
 
                 this.isInitialized = true;
@@ -182,12 +186,103 @@ class AuthManager {
     async signOut() {
         if (this.demoMode) {
             localStorage.removeItem('demoMode');
-            window.location.href = '/login.html';
+            this.showLogoutSuccess();
             return;
         }
 
         await this.auth.signOut();
-        window.location.href = '/login.html';
+        this.showLogoutSuccess();
+    }
+
+    /**
+     * Show logout success modal and redirect to landing page
+     */
+    showLogoutSuccess() {
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.2s ease;
+        `;
+
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: white;
+            border-radius: 16px;
+            padding: 2.5rem;
+            text-align: center;
+            max-width: 400px;
+            margin: 1rem;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+            animation: scaleIn 0.3s ease;
+        `;
+
+        modal.innerHTML = `
+            <div style="
+                width: 64px;
+                height: 64px;
+                background: linear-gradient(135deg, #10b981, #059669);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 1.5rem;
+            ">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
+            </div>
+            <h2 style="
+                font-size: 1.5rem;
+                font-weight: 700;
+                color: #0f172a;
+                margin-bottom: 0.5rem;
+                font-family: 'Roboto Serif', Georgia, serif;
+            ">Signed Out Successfully</h2>
+            <p style="
+                color: #64748b;
+                font-size: 1rem;
+                margin-bottom: 1.5rem;
+                font-family: 'Roboto Serif', Georgia, serif;
+            ">You have been securely logged out.</p>
+            <p style="
+                color: #94a3b8;
+                font-size: 0.875rem;
+                font-family: 'Roboto Serif', Georgia, serif;
+            ">Redirecting to home page...</p>
+        `;
+
+        // Add animation styles
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            @keyframes scaleIn {
+                from { opacity: 0; transform: scale(0.9); }
+                to { opacity: 1; transform: scale(1); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Redirect after delay
+        setTimeout(() => {
+            window.location.href = '/home.html';
+        }, 1500);
     }
 
     /**

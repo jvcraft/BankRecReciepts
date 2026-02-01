@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Bank Reconciliation System</title>
+    <title>Login - Bank Reconciliation Wizard</title>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,7 +16,7 @@
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
-                <h1>Bank Reconciliation</h1>
+                <h1>Bank Reconciliation Wizard</h1>
                 <p id="formTitle">Sign in to your account</p>
             </div>
 
@@ -80,8 +80,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 
     <script>
-        // Firebase configuration - Replace with your own Firebase project credentials
-        // Get these from Firebase Console > Project Settings > General > Your apps > Web app
+        // Firebase configuration
         const firebaseConfig = {
             apiKey: "YOUR_API_KEY",
             authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
@@ -103,7 +102,7 @@
             // Check if already logged in
             auth.onAuthStateChanged(user => {
                 if (user) {
-                    window.location.href = '/';
+                    window.location.href = '/app';
                 }
             });
         } catch (error) {
@@ -238,11 +237,11 @@
                     const displayName = document.getElementById('displayName').value.trim();
                     await credential.user.updateProfile({ displayName });
                     showAlert('Account created successfully! Redirecting...', 'success');
-                    setTimeout(() => { window.location.href = '/'; }, 1000);
+                    setTimeout(() => { window.location.href = '/app'; }, 1000);
                 } else {
                     await auth.signInWithEmailAndPassword(email, password);
                     showAlert('Signed in successfully! Redirecting...', 'success');
-                    setTimeout(() => { window.location.href = '/'; }, 500);
+                    setTimeout(() => { window.location.href = '/app'; }, 500);
                 }
             } catch (error) {
                 console.error('Auth error:', error);
@@ -257,7 +256,7 @@
         function enterDemoMode(e) {
             if (e) e.preventDefault();
             localStorage.setItem('demoMode', 'true');
-            window.location.href = '/';
+            window.location.href = '/app';
         }
 
         // Get user-friendly error message

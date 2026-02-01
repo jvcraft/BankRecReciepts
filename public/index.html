@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bank Reconciliation System</title>
+    <title>Bank Reconciliation Wizard</title>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,9 +16,9 @@
     <div id="app">
         <!-- Navigation Bar -->
         <nav class="main-nav" id="mainNav" style="display: none;">
-            <div class="nav-brand">Bank Reconciliation</div>
+            <div class="nav-brand">Bank Reconciliation Wizard</div>
             <div class="nav-tabs">
-                <button class="nav-tab active" data-view="reconciliation">Reconciliation</button>
+                <button class="nav-tab active" data-view="reconciliation">Home</button>
                 <button class="nav-tab" data-view="history">History</button>
                 <button class="nav-tab" data-view="settings">Settings</button>
             </div>
@@ -30,8 +30,8 @@
 
         <!-- Main Header (shown when not logged in or on reconciliation view) -->
         <header id="mainHeader">
-            <h1>Municipal Bank Reconciliation System</h1>
-            <p class="subtitle">Easily compare and reconcile bank statements with general ledger entries</p>
+            <h1>Reconciliation Wizard</h1>
+            <p class="subtitle">Upload files to compare and reconcile bank statements with general ledger entries</p>
         </header>
 
         <!-- Reconciliation Section -->
@@ -61,7 +61,7 @@
                 </div>
 
                 <div class="settings-card">
-                    <h2>Define Matching Settings</h2>
+                    <h2>Define Matching Parameters</h2>
                     <div class="settings-grid">
                         <div class="setting-item">
                             <label for="dateRange">Date Range (days)</label>
@@ -107,31 +107,38 @@
                             <p>Matched Transactions</p>
                         </div>
                     </div>
+                    <div class="summary-card total">
+                        <div class="card-icon">$</div>
+                        <div class="card-content">
+                            <h3 id="totalAmount">$0.00</h3>
+                            <p>Total Matched</p>
+                        </div>
+                    </div>
                     <div class="summary-card unmatched-bank">
                         <div class="card-icon">!</div>
                         <div class="card-content">
                             <h3 id="unmatchedBankCount">0</h3>
-                            <p>Unmatched Bank Items</p>
+                            <p>Unmatched Bank</p>
                         </div>
                     </div>
                     <div class="summary-card unmatched-gl">
                         <div class="card-icon">!</div>
                         <div class="card-content">
                             <h3 id="unmatchedGLCount">0</h3>
-                            <p>Unmatched GL Items</p>
+                            <p>Unmatched GL</p>
                         </div>
                     </div>
-                    <div class="summary-card total">
-                        <div class="card-icon">$</div>
+                    <div class="summary-card unmatched-total">
+                        <div class="card-icon">⚠</div>
                         <div class="card-content">
-                            <h3 id="totalAmount">$0.00</h3>
-                            <p>Total Matched Amount</p>
+                            <h3 id="unmatchedTotal">$0.00</h3>
+                            <p>Unmatched Total</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Filter Section -->
-                <div class="filter-card">
+                <!-- Filter Section (temporarily hidden) -->
+                <div class="filter-card" style="display: none;">
                     <h3>Filter Results</h3>
                     <div class="filter-grid">
                         <div class="filter-item">
@@ -226,7 +233,7 @@
                 </div>
                 <h3>No Reconciliations Yet</h3>
                 <p>Complete a reconciliation and save it to see your history here.</p>
-                <p class="history-empty-hint">Start by uploading your bank statement and general ledger files on the Reconciliation tab.</p>
+                <p class="history-empty-hint">History will populate upon saving work.</p>
             </div>
             <div id="historyLoading" style="text-align: center; padding: 2rem; display: none;">
                 <div class="spinner" style="margin: 0 auto;"></div>
@@ -297,7 +304,7 @@
                         <select id="settingsTheme">
                             <option value="light">Light</option>
                             <option value="dark">Dark</option>
-                            <option value="system">System</option>
+                            <option value="system">System Theme</option>
                         </select>
                     </div>
                 </div>
@@ -370,7 +377,30 @@
 
                 <!-- Existing matches tab -->
                 <div id="existingMatchTab" class="match-tab-content">
-                    <p class="modal-description">Select a matching item below (sorted by amount similarity):</p>
+                    <p class="modal-description">Select one or more items to match (useful when transactions are split into multiple entries):</p>
+
+                    <!-- Selection Summary -->
+                    <div id="selectionSummary" class="selection-summary" style="display: none;">
+                        <div class="selection-summary-header">
+                            <span class="selection-count"><span id="selectedCount">0</span> item(s) selected</span>
+                            <button type="button" class="clear-selection-btn" id="clearSelectionBtn">Clear All</button>
+                        </div>
+                        <div class="selection-totals">
+                            <div class="selection-total-item">
+                                <span class="label">Selected Total:</span>
+                                <span class="value" id="selectedTotal">$0.00</span>
+                            </div>
+                            <div class="selection-total-item">
+                                <span class="label">Target Amount:</span>
+                                <span class="value" id="targetAmount">$0.00</span>
+                            </div>
+                            <div class="selection-total-item difference">
+                                <span class="label">Difference:</span>
+                                <span class="value" id="selectionDifference">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="matchCandidatesList" class="match-candidates-list"></div>
                 </div>
 

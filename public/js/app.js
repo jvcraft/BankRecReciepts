@@ -7,6 +7,8 @@ class BankReconciliation {
         this.unmatchedBank = [];
         this.unmatchedGL = [];
         this.manualMatches = []; // Track manual matches
+        this.selectedMatches = []; // Track multi-selected items for manual matching
+        this.manualMatchSource = null; // Current source item for manual matching
         this.bankFileName = '';
         this.glFileName = '';
         this.settings = {
@@ -282,34 +284,63 @@ class BankReconciliation {
     smartParseBankData(rows) {
         console.log('[SMART] Starting intelligent bank data parsing...');
 
-        // First, check if this is a headerless format (like the complex bank export format)
+        // Skip leading metadata rows (e.g., "Account Name : ...", "Account Number : ...", "Date Range : ...")
+        // These are single-cell rows or rows with only the first cell populated
+        let startIdx = 0;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+            const row = rows[i];
+            const nonEmptyCells = row.filter(cell => cell && String(cell).trim() !== '').length;
+            const firstCell = String(row[0] || '').toLowerCase().trim();
+
+            // Skip metadata rows: single-cell rows containing labels like "account", "date range", etc.
+            if (nonEmptyCells <= 1 && (
+                firstCell.includes('account') || firstCell.includes('date range') ||
+                firstCell.includes('report') || firstCell.includes('statement') ||
+                firstCell === ''
+            )) {
+                startIdx = i + 1;
+                continue;
+            }
+            break;
+        }
+
+        const cleanedRows = startIdx > 0 ? rows.slice(startIdx) : rows;
+        console.log(`[SMART] Skipped ${startIdx} metadata rows`);
+
+        // Check if this is a headerless format (like the complex bank export format)
         // Look for timestamp patterns like "20251205000000[-5:EST]*" in first column
-        const firstRow = rows[0];
+        const firstRow = cleanedRows[0];
         if (firstRow && firstRow[0] && /^\d{14}\[/.test(String(firstRow[0]))) {
             console.log('[SMART] Detected headerless bank export format');
-            return this.parseHeaderlessBankFormat(rows);
+            return this.parseHeaderlessBankFormat(cleanedRows);
         }
 
         // Find header row by looking for date-like patterns and amount columns
         let headerRowIdx = -1;
         let headers = [];
 
-        for (let i = 0; i < Math.min(rows.length, 20); i++) {
-            const row = rows[i];
+        for (let i = 0; i < Math.min(cleanedRows.length, 20); i++) {
+            const row = cleanedRows[i];
+            if (!row || row.length < 3) continue;
+
             const rowStr = row.join('|').toLowerCase();
+
+            // Skip rows that look like metadata (single important cell)
+            const nonEmpty = row.filter(cell => cell && String(cell).trim() !== '').length;
+            if (nonEmpty <= 1) continue;
 
             // Look for key indicators of a header row
             if (rowStr.includes('date') && (rowStr.includes('amount') || rowStr.includes('debit') || rowStr.includes('credit'))) {
                 headerRowIdx = i;
                 headers = row.map(h => String(h).trim());
-                console.log(`[SMART] Found header row at line ${i}:`, headers);
+                console.log(`[SMART] Found header row at line ${i + startIdx}:`, headers);
                 break;
             }
         }
 
         if (headerRowIdx === -1) {
             console.log('[SMART] No header found, attempting to parse as data-only format');
-            return this.parseDataOnlyBankFormat(rows);
+            return this.parseDataOnlyBankFormat(cleanedRows);
         }
 
         // Create column mapping using fuzzy matching
@@ -317,7 +348,7 @@ class BankReconciliation {
         console.log('[SMART] Column mapping:', columnMap);
 
         // Parse data rows
-        const dataRows = rows.slice(headerRowIdx + 1);
+        const dataRows = cleanedRows.slice(headerRowIdx + 1);
         const transactions = [];
 
         for (const row of dataRows) {
@@ -332,14 +363,40 @@ class BankReconciliation {
                 continue;
             }
 
-            // Parse amounts - get both debit and credit
-            const credit = this.parseAmount(row[columnMap.credit] || '0');
-            const debit = this.parseAmount(row[columnMap.debit] || '0');
-            const amount = credit > 0 ? credit : (debit > 0 ? -debit : this.parseAmount(row[columnMap.amount] || '0'));
+            // Parse amounts - use Math.abs since some bank exports store debits as negative
+            const rawCredit = this.parseAmount(row[columnMap.credit] || '0');
+            const rawDebit = this.parseAmount(row[columnMap.debit] || '0');
+            const credit = Math.abs(rawCredit);
+            const debit = Math.abs(rawDebit);
+
+            // Determine net amount: credits are positive (inflow), debits are negative (outflow)
+            let amount;
+            if (credit > 0 && debit > 0) {
+                amount = credit - debit; // Both present, net them
+            } else if (credit > 0) {
+                amount = credit;
+            } else if (debit > 0) {
+                amount = -debit;
+            } else if (columnMap.amount >= 0) {
+                amount = this.parseAmount(row[columnMap.amount] || '0');
+            } else {
+                amount = 0;
+            }
 
             // Skip if no amount
             if (amount === 0) {
                 continue;
+            }
+
+            // Extract check number from the transaction number field if available
+            // Format: "20250131000000[-5:EST]*-18340.00*1*42144*Check Withdrawal"
+            let checkNumber = row[columnMap.checkNumber] || '';
+            if (!checkNumber && columnMap.transactionNumber >= 0) {
+                const txnStr = String(row[columnMap.transactionNumber] || '');
+                const checkMatch = txnStr.match(/\*(\d{4,})\*(?:Check|Chk)/i);
+                if (checkMatch) {
+                    checkNumber = checkMatch[1];
+                }
             }
 
             transactions.push({
@@ -350,9 +407,9 @@ class BankReconciliation {
                 amountCredit: credit,
                 amountDebit: debit,
                 balance: this.parseAmount(row[columnMap.balance] || '0'),
-                checkNumber: row[columnMap.checkNumber] || '',
+                checkNumber: checkNumber,
                 amount: Math.abs(amount),
-                isDebit: amount < 0 || debit > 0,
+                isDebit: amount < 0,
                 rawRow: row
             });
         }
@@ -692,6 +749,12 @@ class BankReconciliation {
 
         for (let i = 0; i < Math.min(rows.length, 20); i++) {
             const row = rows[i];
+            if (!row || row.length < 3) continue;
+
+            // Skip rows that look like metadata (single cell or empty)
+            const nonEmpty = row.filter(cell => cell && String(cell).trim() !== '').length;
+            if (nonEmpty <= 1) continue;
+
             const rowStr = row.join('|').toLowerCase();
 
             // Look for account number column as key indicator
@@ -702,11 +765,19 @@ class BankReconciliation {
                 break;
             }
 
-            // Also check for "check" and "vendor" columns (Checks Issued format)
-            if (rowStr.includes('check') && (rowStr.includes('vendor') || rowStr.includes('amount'))) {
+            // Check for "check" and "vendor" columns (Checks Issued / Check Register format)
+            if (rowStr.includes('check') && (rowStr.includes('vendor') || rowStr.includes('amount') || rowStr.includes('payee'))) {
                 headerRowIdx = i;
                 headers = row.map(h => String(h).trim());
                 console.log(`[SMART] Found check register header at line ${i}:`, headers);
+                break;
+            }
+
+            // Check for debit/credit columns (generic GL format)
+            if ((rowStr.includes('debit') || rowStr.includes('credit')) && (rowStr.includes('date') || rowStr.includes('description'))) {
+                headerRowIdx = i;
+                headers = row.map(h => String(h).trim());
+                console.log(`[SMART] Found GL header at line ${i}:`, headers);
                 break;
             }
         }
@@ -767,6 +838,27 @@ class BankReconciliation {
                 continue;
             }
 
+            // Skip summary/total rows (e.g., "Fund 01 Totals", "Report Totals")
+            const acctStr = String(accountNumber).toLowerCase().trim();
+            if (acctStr.includes('total') || acctStr.includes('report')) {
+                continue;
+            }
+
+            // Get transaction type
+            const transType = row[columnMap.transactionType] ?
+                String(row[columnMap.transactionType]).trim() :
+                (row[columnMap.type] ? String(row[columnMap.type]).trim() : '');
+
+            // Skip Opening Balance rows and Expenditure rows (double-entry counterparts)
+            const transTypeLower = transType.toLowerCase();
+            if (transTypeLower === 'opening balance') {
+                continue;
+            }
+            // Expenditure entries are internal journal entries, not actual bank transactions
+            if (transTypeLower === 'expenditure') {
+                continue;
+            }
+
             // Get both debit and credit
             const debit = this.parseAmount(row[columnMap.debit] || '0');
             const credit = this.parseAmount(row[columnMap.credit] || '0');
@@ -783,12 +875,20 @@ class BankReconciliation {
                 date = this.parseExcelDate(row[columnMap.date]);
             }
 
-            // Get reference number (check number from description like "Chk: 19032")
+            // Get reference number (check number from description)
+            // Handles: "Chk: 42131", "Chk:  42131", "Chk 42148", "Chk42148"
             let refNumber = '';
-            const descStr = row[columnMap.glDescription] || row[columnMap.description] || '';
-            const chkMatch = String(descStr).match(/Chk:\s*(\d+)/i);
+            let poNumber = '';
+            const descStr = String(row[columnMap.glDescription] || row[columnMap.description] || '');
+            const chkMatch = descStr.match(/Chk[:#]?\s*(\d+)/i);
             if (chkMatch) {
                 refNumber = chkMatch[1];
+            }
+
+            // Extract PO number from description (e.g., "PO 25-00029", "PO: 25-00029")
+            const poMatch = descStr.match(/PO[:#]?\s*([\d-]+)/i);
+            if (poMatch) {
+                poNumber = poMatch[1];
             }
 
             entries.push({
@@ -796,10 +896,12 @@ class BankReconciliation {
                 description: row[columnMap.glDescription] ? String(row[columnMap.glDescription]).trim() :
                              (row[columnMap.description] ? String(row[columnMap.description]).trim() : ''),
                 accountDescription: row[columnMap.accountDescription] ? String(row[columnMap.accountDescription]).trim() : '',
-                type: row[columnMap.type] ? String(row[columnMap.type]).trim() :
-                      (row[columnMap.transactionType] ? String(row[columnMap.transactionType]).trim() : ''),
+                type: transType,
+                transactionType: transTypeLower,
                 date: date,
                 refNumber: row[columnMap.refNumber] || refNumber,
+                checkNumber: refNumber,
+                poNumber: poNumber,
                 beginBalance: this.parseAmount(row[columnMap.beginBalance] || '0'),
                 endingBalance: this.parseAmount(row[columnMap.endingBalance] || row[columnMap.balance] || '0'),
                 debit: debit,
@@ -876,8 +978,8 @@ class BankReconciliation {
             if ((h.includes('account') && h.includes('number')) || h === 'account no' || h === 'acct no' || h === 'account #') {
                 map.accountNumber = idx;
             }
-            // Account description (separate from transaction description)
-            else if (h === 'account description' || h === 'acct desc') {
+            // Account description or account name (separate from transaction description)
+            else if (h === 'account description' || h === 'acct desc' || h === 'checking account' || h === 'account name') {
                 map.accountDescription = idx;
             }
             // General description
@@ -902,7 +1004,7 @@ class BankReconciliation {
                 map.refLedger = idx;
             }
             // Ref Number
-            else if (h === 'ref number' || h === 'ref num' || h === 'reference') {
+            else if (h === 'ref number' || h === 'ref num' || h === 'reference' || h === 'ref #') {
                 map.refNumber = idx;
             }
             // Begin balance
@@ -1258,10 +1360,18 @@ class BankReconciliation {
         const totalMatched = this.matchedTransactions.reduce((sum, match) =>
             sum + Math.abs(match.bankTransaction.amount), 0);
 
+        // Calculate unmatched totals
+        const unmatchedBankTotal = this.unmatchedBank.reduce((sum, tx) =>
+            sum + Math.abs(tx.amount || tx.amountCredit || tx.amountDebit || 0), 0);
+        const unmatchedGLTotal = this.unmatchedGL.reduce((sum, entry) =>
+            sum + Math.abs(entry.amount || entry.debit || entry.credit || 0), 0);
+        const totalUnmatched = unmatchedBankTotal + unmatchedGLTotal;
+
         document.getElementById('matchedCount').textContent = this.matchedTransactions.length;
         document.getElementById('unmatchedBankCount').textContent = this.unmatchedBank.length;
         document.getElementById('unmatchedGLCount').textContent = this.unmatchedGL.length;
         document.getElementById('totalAmount').textContent = this.formatCurrency(totalMatched);
+        document.getElementById('unmatchedTotal').textContent = this.formatCurrency(totalUnmatched);
 
         // Display the current tab
         this.switchTab(this.currentTab);
@@ -1308,27 +1418,47 @@ class BankReconciliation {
         const thead = document.getElementById('resultsTableHead');
         const tbody = document.getElementById('resultsTableBody');
 
-        const newHeaders = ['Bank Date', 'Bank Description', 'Bank Credit', 'GL Account #', 'GL Description', 'GL Debit', 'Match Type', 'Actions'];
-        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+        const newHeaders = [
+            { label: 'Bank Date', key: 'bankDate', sortable: true },
+            { label: 'Bank Description', key: 'bankDesc', sortable: true },
+            { label: 'Bank Credit', key: 'bankAmount', sortable: true },
+            { label: 'GL Account #', key: 'glAccount', sortable: true },
+            { label: 'GL Description', key: 'glDesc', sortable: true },
+            { label: 'GL Debit', key: 'glAmount', sortable: true },
+            { label: 'Match Type', key: 'matchType', sortable: true },
+            { label: 'Actions', key: 'actions', sortable: false }
+        ];
+
+        thead.innerHTML = '<tr>' + newHeaders.map(h =>
+            `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
+        ).join('') + '</tr>';
+
+        // Calculate totals
+        const totalBankAmount = data.reduce((sum, m) => sum + Math.abs(m.bankTransaction.amount || 0), 0);
+        const totalGLAmount = data.reduce((sum, m) => sum + Math.abs(m.glEntry.amount || m.glEntry.debit || 0), 0);
 
         tbody.innerHTML = data.map((match, idx) => {
             const bank = match.bankTransaction;
             const gl = match.glEntry;
+            const bankAmount = bank.amount || bank.amountCredit || 0;
+            const glAmount = gl.amount || gl.debit || 0;
             const manualBadge = match.isManual ? '<span class="manual-badge">Manual</span>' : '';
-            const difference = Math.abs(bank.amount - gl.amount);
+            const multiBadge = match.isMultiMatch ? `<span class="manual-badge" style="background:#fef3c7;color:#b45309;">×${match.matchedCount}</span>` : '';
+            const difference = Math.abs(bankAmount - glAmount);
             const diffDisplay = difference > 0.01 ? `<span class="diff-badge">Diff: ${this.formatCurrency(difference)}</span>` : '';
 
             return `
                 <tr>
                     <td>${this.formatDate(bank.date)}</td>
-                    <td>${this.escapeHtml(bank.description)}</td>
-                    <td class="amount-credit">${this.formatCurrency(bank.amount)}</td>
+                    <td title="${this.escapeHtml(bank.description)}">${this.escapeHtml(this.truncate(bank.description, 40))}</td>
+                    <td class="amount-credit">${this.formatCurrency(bankAmount)}</td>
                     <td>${this.escapeHtml(gl.accountNumber)}</td>
-                    <td>${this.escapeHtml(gl.description)}</td>
-                    <td class="amount-debit">${this.formatCurrency(gl.amount)}</td>
+                    <td title="${this.escapeHtml(gl.description)}">${this.escapeHtml(this.truncate(gl.description, 40))}</td>
+                    <td class="amount-debit">${this.formatCurrency(glAmount)}</td>
                     <td>
                         <span class="match-status matched">${this.escapeHtml(match.matchType)}</span>
                         ${manualBadge}
+                        ${multiBadge}
                         ${diffDisplay}
                     </td>
                     <td>
@@ -1338,6 +1468,17 @@ class BankReconciliation {
             `;
         }).join('');
 
+        // Add totals row
+        tbody.innerHTML += `
+            <tr class="table-footer">
+                <td colspan="2" class="total-label">TOTALS (${data.length} transactions)</td>
+                <td class="amount-credit total-value">${this.formatCurrency(totalBankAmount)}</td>
+                <td colspan="2"></td>
+                <td class="amount-debit total-value">${this.formatCurrency(totalGLAmount)}</td>
+                <td colspan="2"></td>
+            </tr>
+        `;
+
         // Attach event listeners to Unmatch buttons
         tbody.querySelectorAll('[data-action="unmatch"]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1345,20 +1486,123 @@ class BankReconciliation {
                 this.unmatchTransaction(idx);
             });
         });
+
+        // Attach sorting listeners
+        this.attachSortingListeners('matched', data);
+    }
+
+    truncate(str, length) {
+        if (!str) return '';
+        return str.length > length ? str.substring(0, length) + '...' : str;
+    }
+
+    attachSortingListeners(tabType, data) {
+        const thead = document.getElementById('resultsTableHead');
+        thead.querySelectorAll('th.sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.dataset.sort;
+                const currentDir = th.classList.contains('sort-asc') ? 'asc' : th.classList.contains('sort-desc') ? 'desc' : 'none';
+                const newDir = currentDir === 'asc' ? 'desc' : 'asc';
+
+                // Remove sort classes from all headers
+                thead.querySelectorAll('th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+                th.classList.add(`sort-${newDir}`);
+
+                // Sort data
+                this.sortTableData(tabType, key, newDir);
+            });
+        });
+    }
+
+    sortTableData(tabType, key, direction) {
+        const multiplier = direction === 'asc' ? 1 : -1;
+
+        const getSortValue = (item, key) => {
+            switch(key) {
+                case 'bankDate':
+                    return item.bankTransaction?.date ? new Date(item.bankTransaction.date).getTime() : 0;
+                case 'bankDesc':
+                    return item.bankTransaction?.description?.toLowerCase() || '';
+                case 'bankAmount':
+                    return Math.abs(item.bankTransaction?.amount || item.bankTransaction?.amountCredit || 0);
+                case 'glAccount':
+                    return item.glEntry?.accountNumber?.toLowerCase() || '';
+                case 'glDesc':
+                    return item.glEntry?.description?.toLowerCase() || '';
+                case 'glAmount':
+                    return Math.abs(item.glEntry?.amount || item.glEntry?.debit || 0);
+                case 'matchType':
+                    return item.matchType?.toLowerCase() || '';
+                case 'date':
+                    return item.date ? new Date(item.date).getTime() : 0;
+                case 'description':
+                    return item.description?.toLowerCase() || '';
+                case 'amount':
+                    return Math.abs(item.amount || item.amountCredit || item.debit || 0);
+                case 'accountNumber':
+                    return item.accountNumber?.toLowerCase() || '';
+                default:
+                    return '';
+            }
+        };
+
+        if (tabType === 'matched') {
+            this.matchedTransactions.sort((a, b) => {
+                const aVal = getSortValue(a, key);
+                const bVal = getSortValue(b, key);
+                if (typeof aVal === 'string') {
+                    return aVal.localeCompare(bVal) * multiplier;
+                }
+                return (aVal - bVal) * multiplier;
+            });
+            this.renderMatchedTable(this.matchedTransactions);
+        } else if (tabType === 'unmatched-bank') {
+            this.unmatchedBank.sort((a, b) => {
+                const aVal = getSortValue(a, key);
+                const bVal = getSortValue(b, key);
+                if (typeof aVal === 'string') {
+                    return aVal.localeCompare(bVal) * multiplier;
+                }
+                return (aVal - bVal) * multiplier;
+            });
+            this.renderUnmatchedBankTable(this.unmatchedBank);
+        } else if (tabType === 'unmatched-gl') {
+            this.unmatchedGL.sort((a, b) => {
+                const aVal = getSortValue(a, key);
+                const bVal = getSortValue(b, key);
+                if (typeof aVal === 'string') {
+                    return aVal.localeCompare(bVal) * multiplier;
+                }
+                return (aVal - bVal) * multiplier;
+            });
+            this.renderUnmatchedGLTable(this.unmatchedGL);
+        }
     }
 
     renderUnmatchedBankTable(data, headers) {
         const thead = document.getElementById('resultsTableHead');
         const tbody = document.getElementById('resultsTableBody');
 
-        const newHeaders = ['Date', 'Description', 'Credit Amount', 'Balance', 'Actions'];
-        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+        const newHeaders = [
+            { label: 'Date', key: 'date', sortable: true },
+            { label: 'Description', key: 'description', sortable: true },
+            { label: 'Credit Amount', key: 'amount', sortable: true },
+            { label: 'Balance', key: 'balance', sortable: true },
+            { label: 'Actions', key: 'actions', sortable: false }
+        ];
+        thead.innerHTML = '<tr>' + newHeaders.map(h =>
+            `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
+        ).join('') + '</tr>';
+
+        // Calculate total
+        const totalAmount = data.reduce((sum, tx) =>
+            sum + Math.abs(tx.amountCredit || tx.amount || 0), 0);
 
         tbody.innerHTML = data.map((tx, idx) => `
             <tr>
                 <td>${this.formatDate(tx.date)}</td>
-                <td>${this.escapeHtml(tx.description)}</td>
-                <td class="amount-credit">${this.formatCurrency(tx.amountCredit)}</td>
+                <td title="${this.escapeHtml(tx.description)}">${this.escapeHtml(this.truncate(tx.description, 50))}</td>
+                <td class="amount-credit">${this.formatCurrency(tx.amountCredit || tx.amount || 0)}</td>
                 <td>${this.formatCurrency(tx.balance)}</td>
                 <td>
                     <button class="action-btn match-btn" data-action="find-match" data-type="bank" data-idx="${idx}">Find Match</button>
@@ -1366,6 +1610,15 @@ class BankReconciliation {
             </tr>
         `).join('');
 
+        // Add totals row
+        tbody.innerHTML += `
+            <tr class="table-footer">
+                <td colspan="2" class="total-label">TOTAL UNMATCHED BANK (${data.length} items)</td>
+                <td class="amount-credit total-value">${this.formatCurrency(totalAmount)}</td>
+                <td colspan="2"></td>
+            </tr>
+        `;
+
         // Attach event listeners to Find Match buttons
         tbody.querySelectorAll('[data-action="find-match"]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1374,26 +1627,50 @@ class BankReconciliation {
                 this.showManualMatch(type, idx);
             });
         });
+
+        // Attach sorting listeners
+        this.attachSortingListeners('unmatched-bank', data);
     }
 
     renderUnmatchedGLTable(data, headers) {
         const thead = document.getElementById('resultsTableHead');
         const tbody = document.getElementById('resultsTableBody');
 
-        const newHeaders = ['Account Number', 'Description', 'Type', 'Debit Amount', 'Actions'];
-        thead.innerHTML = '<tr>' + newHeaders.map(h => `<th>${h}</th>`).join('') + '</tr>';
+        const newHeaders = [
+            { label: 'Account Number', key: 'accountNumber', sortable: true },
+            { label: 'Description', key: 'description', sortable: true },
+            { label: 'Type', key: 'type', sortable: true },
+            { label: 'Debit Amount', key: 'amount', sortable: true },
+            { label: 'Actions', key: 'actions', sortable: false }
+        ];
+        thead.innerHTML = '<tr>' + newHeaders.map(h =>
+            `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
+        ).join('') + '</tr>';
+
+        // Calculate total
+        const totalAmount = data.reduce((sum, entry) =>
+            sum + Math.abs(entry.debit || entry.amount || entry.credit || 0), 0);
 
         tbody.innerHTML = data.map((entry, idx) => `
             <tr>
                 <td>${this.escapeHtml(entry.accountNumber)}</td>
-                <td>${this.escapeHtml(entry.description)}</td>
+                <td title="${this.escapeHtml(entry.description)}">${this.escapeHtml(this.truncate(entry.description, 50))}</td>
                 <td>${this.escapeHtml(entry.type)}</td>
-                <td class="amount-debit">${this.formatCurrency(entry.debit)}</td>
+                <td class="amount-debit">${this.formatCurrency(entry.debit || entry.amount || 0)}</td>
                 <td>
                     <button class="action-btn match-btn" data-action="find-match" data-type="gl" data-idx="${idx}">Find Match</button>
                 </td>
             </tr>
         `).join('');
+
+        // Add totals row
+        tbody.innerHTML += `
+            <tr class="table-footer">
+                <td colspan="3" class="total-label">TOTAL UNMATCHED GL (${data.length} items)</td>
+                <td class="amount-debit total-value">${this.formatCurrency(totalAmount)}</td>
+                <td></td>
+            </tr>
+        `;
 
         // Attach event listeners to Find Match buttons
         tbody.querySelectorAll('[data-action="find-match"]').forEach(btn => {
@@ -1403,21 +1680,44 @@ class BankReconciliation {
                 this.showManualMatch(type, idx);
             });
         });
+
+        // Attach sorting listeners
+        this.attachSortingListeners('unmatched-gl', data);
     }
 
     unmatchTransaction(matchIdx) {
-        if (!confirm('Are you sure you want to unmatch this transaction?')) return;
-
         const match = this.matchedTransactions[matchIdx];
+        const confirmMsg = match.isMultiMatch
+            ? `This is a multi-match with ${match.matchedCount} items. Are you sure you want to unmatch all of them?`
+            : 'Are you sure you want to unmatch this transaction?';
 
-        // Add back to unmatched arrays
-        this.unmatchedBank.push(match.bankTransaction);
-        this.unmatchedGL.push(match.glEntry);
+        if (!confirm(confirmMsg)) return;
+
+        // Handle multi-match - restore all original items
+        if (match.isMultiMatch) {
+            if (match.bankTransaction.combinedItems) {
+                // Multiple bank items were matched to one GL
+                match.bankTransaction.combinedItems.forEach(item => {
+                    this.unmatchedBank.push(item);
+                });
+                this.unmatchedGL.push(match.glEntry);
+            } else if (match.glEntry.combinedItems) {
+                // Multiple GL items were matched to one bank
+                match.glEntry.combinedItems.forEach(item => {
+                    this.unmatchedGL.push(item);
+                });
+                this.unmatchedBank.push(match.bankTransaction);
+            }
+        } else {
+            // Standard single match
+            this.unmatchedBank.push(match.bankTransaction);
+            this.unmatchedGL.push(match.glEntry);
+        }
 
         // Remove from matched
         this.matchedTransactions.splice(matchIdx, 1);
 
-        console.log('[UNMATCH] Transaction unmatched');
+        console.log('[UNMATCH] Transaction unmatched', match.isMultiMatch ? `(${match.matchedCount} items restored)` : '');
 
         // Refresh display
         this.displayResults();
@@ -1426,13 +1726,16 @@ class BankReconciliation {
     showManualMatch(sourceType, sourceIdx) {
         const modal = document.getElementById('manualMatchModal');
         const list = document.getElementById('matchCandidatesList');
+        const selectionSummary = document.getElementById('selectionSummary');
 
         // Store current selection
         this.manualMatchSource = { type: sourceType, idx: sourceIdx };
+        this.selectedMatches = []; // Array to store multi-selected items
 
         // Get the source item
         const sourceItem = sourceType === 'bank' ? this.unmatchedBank[sourceIdx] : this.unmatchedGL[sourceIdx];
         const targetItems = sourceType === 'bank' ? this.unmatchedGL : this.unmatchedBank;
+        const sourceAmount = sourceItem.amount || sourceItem.amountCredit || sourceItem.amountDebit || 0;
 
         // Update modal title with clearer context
         if (sourceType === 'bank') {
@@ -1442,7 +1745,7 @@ class BankReconciliation {
                 <div class="source-info bank-source">
                     <strong>Bank Transaction:</strong> ${this.escapeHtml(sourceItem.description)}<br>
                     <strong>Date:</strong> ${this.formatDate(sourceItem.date)}<br>
-                    <strong>Credit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceItem.amount)}</span>
+                    <strong>Credit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceAmount)}</span>
                 </div>
             `;
         } else {
@@ -1452,22 +1755,23 @@ class BankReconciliation {
                 <div class="source-info gl-source">
                     <strong>GL Entry:</strong> ${this.escapeHtml(sourceItem.accountNumber)} - ${this.escapeHtml(sourceItem.description)}<br>
                     <strong>Type:</strong> ${this.escapeHtml(sourceItem.type)}<br>
-                    <strong>Debit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceItem.amount)}</span>
+                    <strong>Debit Amount:</strong> <span class="amount-highlight">${this.formatCurrency(sourceAmount)}</span>
                 </div>
             `;
         }
 
-        // Populate candidates with better formatting and sorting
-        const sourceAmount = sourceItem.amount;
+        // Set target amount for selection summary
+        document.getElementById('targetAmount').textContent = this.formatCurrency(sourceAmount);
 
         // Sort candidates by amount similarity
         const sortedTargets = targetItems.map((item, idx) => ({
             item,
             idx,
-            diff: Math.abs(item.amount - sourceAmount)
+            amount: item.amount || item.amountCredit || item.amountDebit || item.debit || item.credit || 0,
+            diff: Math.abs((item.amount || item.amountCredit || item.amountDebit || item.debit || item.credit || 0) - sourceAmount)
         })).sort((a, b) => a.diff - b.diff);
 
-        list.innerHTML = sortedTargets.map(({item, idx, diff}) => {
+        list.innerHTML = sortedTargets.map(({item, idx, amount, diff}) => {
             const matchQuality = diff === 0 ? 'exact-match' : diff < sourceAmount * 0.01 ? 'close-match' : '';
             const diffBadge = diff > 0.01 ? `<span class="diff-indicator">Diff: ${this.formatCurrency(diff)}</span>` : '<span class="exact-indicator">Exact Match</span>';
 
@@ -1479,7 +1783,7 @@ class BankReconciliation {
                         <strong>${this.escapeHtml(item.accountNumber)}</strong> - ${this.escapeHtml(item.description)}
                     </div>
                     <div class="candidate-details">
-                        <span class="candidate-amount">${this.formatCurrency(item.amount)}</span>
+                        <span class="candidate-amount">${this.formatCurrency(amount)}</span>
                         ${diffBadge}
                     </div>
                 `;
@@ -1490,15 +1794,15 @@ class BankReconciliation {
                         <strong>${this.formatDate(item.date)}</strong> - ${this.escapeHtml(item.description)}
                     </div>
                     <div class="candidate-details">
-                        <span class="candidate-amount">${this.formatCurrency(item.amount)}</span>
+                        <span class="candidate-amount">${this.formatCurrency(amount)}</span>
                         ${diffBadge}
                     </div>
                 `;
             }
 
             return `
-                <div class="match-candidate ${matchQuality}" data-candidate-idx="${idx}">
-                    <input type="radio" name="manualMatch" value="${idx}" id="match_${idx}">
+                <div class="match-candidate ${matchQuality}" data-candidate-idx="${idx}" data-amount="${amount}">
+                    <input type="checkbox" name="manualMatch" value="${idx}" id="match_${idx}">
                     <label for="match_${idx}">
                         ${itemDesc}
                     </label>
@@ -1508,62 +1812,246 @@ class BankReconciliation {
 
         if (sortedTargets.length === 0) {
             list.innerHTML = '<p class="no-matches">No available items to match with. All items may already be matched.</p>';
+            selectionSummary.style.display = 'none';
         }
 
-        // Attach event listeners to match candidates
-        list.querySelectorAll('.match-candidate').forEach(candidate => {
-            candidate.addEventListener('click', () => {
+        // Attach event listeners to checkboxes for multi-selection
+        list.querySelectorAll('.match-candidate input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                const candidate = e.target.closest('.match-candidate');
                 const idx = parseInt(candidate.dataset.candidateIdx);
-                this.selectManualMatch(idx);
+                const amount = parseFloat(candidate.dataset.amount);
+
+                if (e.target.checked) {
+                    candidate.classList.add('selected');
+                    this.selectedMatches.push({ idx, amount });
+                } else {
+                    candidate.classList.remove('selected');
+                    this.selectedMatches = this.selectedMatches.filter(m => m.idx !== idx);
+                }
+
+                this.updateSelectionSummary(sourceAmount);
             });
         });
+
+        // Allow clicking on candidate row to toggle selection
+        list.querySelectorAll('.match-candidate').forEach(candidate => {
+            candidate.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'INPUT') {
+                    const checkbox = candidate.querySelector('input[type="checkbox"]');
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
+                }
+            });
+        });
+
+        // Clear selection button
+        const clearBtn = document.getElementById('clearSelectionBtn');
+        if (clearBtn) {
+            clearBtn.onclick = () => {
+                list.querySelectorAll('.match-candidate input[type="checkbox"]').forEach(cb => {
+                    cb.checked = false;
+                    cb.closest('.match-candidate').classList.remove('selected');
+                });
+                this.selectedMatches = [];
+                this.updateSelectionSummary(sourceAmount);
+            };
+        }
+
+        // Initialize selection summary as hidden
+        selectionSummary.style.display = 'none';
 
         modal.style.display = 'flex';
     }
 
-    selectManualMatch(targetIdx) {
-        const radio = document.querySelector(`input[name="manualMatch"][value="${targetIdx}"]`);
-        if (radio) radio.checked = true;
-    }
+    updateSelectionSummary(targetAmount) {
+        const selectionSummary = document.getElementById('selectionSummary');
+        const selectedCount = document.getElementById('selectedCount');
+        const selectedTotal = document.getElementById('selectedTotal');
+        const selectionDifference = document.getElementById('selectionDifference');
 
-    confirmManualMatch() {
-        const selected = document.querySelector('input[name="manualMatch"]:checked');
-        if (!selected) {
-            alert('Please select an item to match');
+        if (this.selectedMatches.length === 0) {
+            selectionSummary.style.display = 'none';
             return;
         }
 
-        const targetIdx = parseInt(selected.value);
+        selectionSummary.style.display = 'block';
+        selectedCount.textContent = this.selectedMatches.length;
+
+        const total = this.selectedMatches.reduce((sum, m) => sum + m.amount, 0);
+        selectedTotal.textContent = this.formatCurrency(total);
+
+        const diff = total - targetAmount;
+        selectionDifference.textContent = this.formatCurrency(Math.abs(diff));
+
+        // Update difference styling
+        selectionDifference.classList.remove('exact', 'over');
+        if (Math.abs(diff) < 0.01) {
+            selectionDifference.classList.add('exact');
+            selectionDifference.textContent = 'Exact Match!';
+        } else if (diff > 0) {
+            selectionDifference.classList.add('over');
+            selectionDifference.textContent = `+${this.formatCurrency(diff)} over`;
+        } else {
+            selectionDifference.textContent = `${this.formatCurrency(Math.abs(diff))} under`;
+        }
+    }
+
+    selectManualMatch(targetIdx) {
+        // Toggle checkbox for the given index
+        const checkbox = document.querySelector(`input[name="manualMatch"][value="${targetIdx}"]`);
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+        }
+    }
+
+    confirmManualMatch() {
         const source = this.manualMatchSource;
 
-        let bankItem, glItem;
-
-        if (source.type === 'bank') {
-            bankItem = this.unmatchedBank[source.idx];
-            glItem = this.unmatchedGL[targetIdx];
-
-            // Remove from unmatched
-            this.unmatchedBank.splice(source.idx, 1);
-            this.unmatchedGL.splice(targetIdx, 1);
-        } else {
-            glItem = this.unmatchedGL[source.idx];
-            bankItem = this.unmatchedBank[targetIdx];
-
-            // Remove from unmatched
-            this.unmatchedGL.splice(source.idx, 1);
-            this.unmatchedBank.splice(targetIdx, 1);
+        // Check if we have multi-selection
+        if (this.selectedMatches && this.selectedMatches.length > 0) {
+            // Multi-to-one matching
+            this.confirmMultiMatch();
+            return;
         }
 
-        // Add to matched
-        this.matchedTransactions.push({
-            bankTransaction: bankItem,
-            glEntry: glItem,
-            matchScore: 1.0,
-            matchType: 'Manual Match',
-            isManual: true
-        });
+        // Fallback: check for single selection (backwards compatibility)
+        const selected = document.querySelectorAll('input[name="manualMatch"]:checked');
+        if (selected.length === 0) {
+            alert('Please select one or more items to match');
+            return;
+        }
 
-        console.log('[MANUAL] Manual match created');
+        // If single selection, use original logic
+        if (selected.length === 1) {
+            const targetIdx = parseInt(selected[0].value);
+            let bankItem, glItem;
+
+            if (source.type === 'bank') {
+                bankItem = this.unmatchedBank[source.idx];
+                glItem = this.unmatchedGL[targetIdx];
+
+                // Remove from unmatched
+                this.unmatchedBank.splice(source.idx, 1);
+                this.unmatchedGL.splice(targetIdx, 1);
+            } else {
+                glItem = this.unmatchedGL[source.idx];
+                bankItem = this.unmatchedBank[targetIdx];
+
+                // Remove from unmatched
+                this.unmatchedGL.splice(source.idx, 1);
+                this.unmatchedBank.splice(targetIdx, 1);
+            }
+
+            // Add to matched
+            this.matchedTransactions.push({
+                bankTransaction: bankItem,
+                glEntry: glItem,
+                matchScore: 1.0,
+                matchType: 'Manual Match',
+                isManual: true
+            });
+
+            console.log('[MANUAL] Manual match created');
+        } else {
+            // Multi-selection - process through confirmMultiMatch
+            this.selectedMatches = Array.from(selected).map(cb => ({
+                idx: parseInt(cb.value),
+                amount: parseFloat(cb.closest('.match-candidate').dataset.amount)
+            }));
+            this.confirmMultiMatch();
+            return;
+        }
+
+        this.closeManualMatchModal();
+        this.displayResults();
+    }
+
+    confirmMultiMatch() {
+        const source = this.manualMatchSource;
+
+        if (!this.selectedMatches || this.selectedMatches.length === 0) {
+            alert('Please select one or more items to match');
+            return;
+        }
+
+        // Sort selected indices in descending order for safe removal
+        const sortedSelections = [...this.selectedMatches].sort((a, b) => b.idx - a.idx);
+
+        if (source.type === 'bank') {
+            // Bank item matched to multiple GL items
+            const bankItem = this.unmatchedBank[source.idx];
+            const glItems = sortedSelections.map(s => this.unmatchedGL[s.idx]);
+            const totalGLAmount = glItems.reduce((sum, item) =>
+                sum + Math.abs(item.amount || item.debit || item.credit || 0), 0);
+
+            // Remove GL items (in reverse order to preserve indices)
+            sortedSelections.forEach(s => {
+                this.unmatchedGL.splice(s.idx, 1);
+            });
+
+            // Remove bank item
+            this.unmatchedBank.splice(source.idx, 1);
+
+            // Create a combined match entry
+            this.matchedTransactions.push({
+                bankTransaction: bankItem,
+                glEntry: {
+                    accountNumber: glItems.map(g => g.accountNumber).join(', '),
+                    description: glItems.length > 1
+                        ? `[${glItems.length} items combined] ` + glItems.map(g => g.description).filter(d => d).join('; ')
+                        : glItems[0].description,
+                    type: 'Combined',
+                    amount: totalGLAmount,
+                    debit: totalGLAmount,
+                    combinedItems: glItems // Store original items for reference
+                },
+                matchScore: 1.0,
+                matchType: `Multi-Match (${glItems.length} GL → 1 Bank)`,
+                isManual: true,
+                isMultiMatch: true,
+                matchedCount: glItems.length
+            });
+
+            console.log(`[MULTI-MATCH] Matched ${glItems.length} GL items to 1 Bank item`);
+        } else {
+            // GL item matched to multiple Bank items
+            const glItem = this.unmatchedGL[source.idx];
+            const bankItems = sortedSelections.map(s => this.unmatchedBank[s.idx]);
+            const totalBankAmount = bankItems.reduce((sum, item) =>
+                sum + Math.abs(item.amount || item.amountCredit || item.amountDebit || 0), 0);
+
+            // Remove bank items (in reverse order to preserve indices)
+            sortedSelections.forEach(s => {
+                this.unmatchedBank.splice(s.idx, 1);
+            });
+
+            // Remove GL item
+            this.unmatchedGL.splice(source.idx, 1);
+
+            // Create a combined match entry
+            this.matchedTransactions.push({
+                bankTransaction: {
+                    transactionNumber: bankItems.map(b => b.transactionNumber || b.checkNumber).filter(n => n).join(', '),
+                    date: bankItems[0].date, // Use first item's date
+                    description: bankItems.length > 1
+                        ? `[${bankItems.length} items combined] ` + bankItems.map(b => b.description).filter(d => d).join('; ')
+                        : bankItems[0].description,
+                    amount: totalBankAmount,
+                    amountCredit: totalBankAmount,
+                    combinedItems: bankItems // Store original items for reference
+                },
+                glEntry: glItem,
+                matchScore: 1.0,
+                matchType: `Multi-Match (${bankItems.length} Bank → 1 GL)`,
+                isManual: true,
+                isMultiMatch: true,
+                matchedCount: bankItems.length
+            });
+
+            console.log(`[MULTI-MATCH] Matched ${bankItems.length} Bank items to 1 GL item`);
+        }
 
         this.closeManualMatchModal();
         this.displayResults();
@@ -1634,6 +2122,14 @@ class BankReconciliation {
 
     closeManualMatchModal() {
         document.getElementById('manualMatchModal').style.display = 'none';
+        // Reset selection state
+        this.selectedMatches = [];
+        this.manualMatchSource = null;
+        // Hide selection summary
+        const selectionSummary = document.getElementById('selectionSummary');
+        if (selectionSummary) {
+            selectionSummary.style.display = 'none';
+        }
     }
 
     showDebugInfo() {

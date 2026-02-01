@@ -93,8 +93,18 @@ app.use(morgan(isProduction ? 'combined' : 'dev'));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Static files
-app.use(express.static(path.join(__dirname, '../public')));
+// Home page (landing page) - MUST be before static files
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/home.html'));
+});
+
+// App page (requires auth - handled client-side)
+app.get('/app', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// Static files - index option false prevents auto-serving index.html for /
+app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -126,9 +136,13 @@ app.get('/api/ready', async (req, res) => {
     }
 });
 
-// Serve index.html for SPA routes
+// Catch-all for SPA routes - serve landing page
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
+    // Check if it's an asset request that wasn't found
+    if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)) {
+        return res.status(404).send('Not found');
+    }
+    res.sendFile(path.join(__dirname, '../public/home.html'));
 });
 
 // Error handling
