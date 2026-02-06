@@ -67,9 +67,9 @@ body {
 header {
     background: var(--primary-color);
     color: white;
-    padding: 2.5rem 2rem;
+    padding: 2rem 2rem;
     text-align: center;
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-md);
     position: relative;
     overflow: hidden;
 }
@@ -77,25 +77,23 @@ header {
 header::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
     pointer-events: none;
 }
 
 header h1 {
-    font-size: 2.25rem;
+    font-size: 2rem;
     font-weight: 700;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
     letter-spacing: -0.025em;
     position: relative;
 }
 
 header .subtitle {
-    font-size: 1.1rem;
-    opacity: 0.9;
+    font-size: 1rem;
+    opacity: 0.8;
     font-weight: 300;
     position: relative;
 }
@@ -129,9 +127,15 @@ section {
     background: var(--card-bg);
     border-radius: var(--radius-lg);
     padding: 2rem;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow);
     border: 1px solid var(--border-light);
     transition: box-shadow var(--transition-normal), transform var(--transition-normal);
+}
+
+.upload-card h2,
+.settings-card h2 {
+    display: flex;
+    align-items: center;
 }
 
 /* Results card connected to tabs */
@@ -142,8 +146,8 @@ section {
 
 .upload-card:hover,
 .settings-card:hover {
-    box-shadow: var(--shadow-lg);
-    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
 }
 
 h2 {
@@ -204,13 +208,14 @@ input[type="file"] {
 input[type="file"]:hover {
     border-color: var(--primary-color);
     background: var(--primary-50);
-    border-style: solid;
+    border-style: dashed;
 }
 
 input[type="file"]:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.15);
+    box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+    border-style: solid;
 }
 
 .file-name {
@@ -334,22 +339,22 @@ input[type="file"]:focus {
 
 .progress-card {
     text-align: center;
+    animation: card-fade-in 0.4s ease-out both;
 }
 
 .progress-bar {
     width: 100%;
-    height: 10px;
+    height: 8px;
     background: var(--border-light);
-    border-radius: 5px;
+    border-radius: 4px;
     overflow: hidden;
     margin: 1rem 0;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary-color) 0%, var(--success-color) 100%);
-    border-radius: 5px;
+    background: var(--primary-color);
+    border-radius: 4px;
     transition: width var(--transition-slow);
     width: 0%;
     position: relative;
@@ -433,7 +438,7 @@ input[type="file"]:focus {
     background: var(--card-bg);
     border-radius: var(--radius-lg);
     padding: 1.25rem;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow);
     border: 1px solid var(--border-light);
     display: flex;
     align-items: center;
@@ -441,6 +446,24 @@ input[type="file"]:focus {
     transition: all var(--transition-normal);
     position: relative;
     overflow: hidden;
+    animation: card-fade-in 0.4s ease-out both;
+}
+
+.summary-card:nth-child(1) { animation-delay: 0s; }
+.summary-card:nth-child(2) { animation-delay: 0.06s; }
+.summary-card:nth-child(3) { animation-delay: 0.12s; }
+.summary-card:nth-child(4) { animation-delay: 0.18s; }
+.summary-card:nth-child(5) { animation-delay: 0.24s; }
+
+@keyframes card-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .summary-card::before {
@@ -455,8 +478,8 @@ input[type="file"]:focus {
 }
 
 .summary-card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
 }
 
 .summary-card:hover::before {
@@ -548,7 +571,7 @@ input[type="file"]:focus {
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     border: 1px solid var(--border-light);
     border-bottom: none;
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-xs);
     overflow: hidden;
 }
 
@@ -600,13 +623,30 @@ input[type="file"]:focus {
     gap: 1rem;
 }
 
+.results-header h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0;
+}
+
 .export-buttons {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.5rem;
+}
+
+.export-buttons .secondary-btn {
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+}
+
+.export-buttons .primary-btn {
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    width: auto;
 }
 
 .table-wrapper {
     overflow-x: auto;
+    border-radius: var(--radius-sm);
 }
 
 table {
@@ -625,18 +665,25 @@ th {
     padding: 0.75rem;
     text-align: left;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--text-secondary);
     border-bottom: 2px solid var(--border-color);
     white-space: nowrap;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 td {
     padding: 0.75rem;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-light);
+}
+
+tbody tr {
+    transition: background var(--transition-fast);
 }
 
 tbody tr:hover {
-    background: var(--bg-color);
+    background: var(--primary-50);
 }
 
 .amount-debit {
@@ -650,18 +697,19 @@ tbody tr:hover {
 .match-status {
     display: inline-block;
     padding: 0.25rem 0.75rem;
-    border-radius: 12px;
+    border-radius: 20px;
     font-size: 0.75rem;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 .match-status.matched {
-    background: #d1fae5;
+    background: var(--success-light);
     color: var(--success-color);
 }
 
 .match-status.unmatched {
-    background: #fed7aa;
+    background: var(--warning-light);
     color: var(--warning-color);
 }
 
@@ -813,6 +861,7 @@ tbody tr:hover {
     flex-direction: column;
     box-shadow: var(--shadow-xl);
     animation: slideUp var(--transition-normal);
+    border: 1px solid var(--border-light);
 }
 
 .modal-content-large {
@@ -1223,12 +1272,13 @@ tbody tr:hover {
     align-items: center;
     transition: all var(--transition-fast);
     cursor: pointer;
+    box-shadow: var(--shadow-xs);
 }
 
 .history-item:hover {
     border-color: var(--primary-color);
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+    transform: translateY(-1px);
 }
 
 .history-item-info h4 {
@@ -1320,20 +1370,43 @@ tbody tr:hover {
     margin: 0 auto;
 }
 
+.settings-section > h2 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    color: var(--text-primary);
+}
+
 .settings-group {
     background: var(--card-bg);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-xs);
+    transition: box-shadow var(--transition-normal);
+}
+
+.settings-group:hover {
+    box-shadow: var(--shadow);
 }
 
 .settings-group h3 {
-    font-size: 1.125rem;
+    font-size: 1.05rem;
     font-weight: 600;
     margin-bottom: 1.25rem;
     padding-bottom: 0.75rem;
     border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    color: var(--text-primary);
+}
+
+.settings-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
 }
 
 .settings-row {

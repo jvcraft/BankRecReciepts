@@ -26,14 +26,28 @@ async function loadSettings() {
  */
 function getDefaultSettings() {
     return {
+        // Matching preferences
         defaultDateRange: 3,
         defaultAmountTolerance: 0.00,
+        matchByCheck: true,
+        matchByDescription: false,
+        minConfidence: 50,
+        // Data parsing
+        autoDetectHeaders: true,
+        absoluteAmounts: true,
+        skipExpenditure: true,
+        dateParsing: 'MDY',
+        // Display preferences
         dateFormat: 'MM/DD/YYYY',
         currencyFormat: 'USD',
         theme: 'light',
+        resultsPerPage: 100,
+        showConfidenceScores: true,
+        highlightClose: true,
+        // Export & Save
         exportFormat: 'xlsx',
-        autoSaveEnabled: false,
-        showConfidenceScores: true
+        exportUnmatched: true,
+        autoSaveEnabled: false
     };
 }
 
@@ -43,30 +57,35 @@ function getDefaultSettings() {
 function applySettingsToUI() {
     if (!currentSettings) return;
 
-    // Matching preferences
-    const dateRangeEl = document.getElementById('settingsDateRange');
-    const amountToleranceEl = document.getElementById('settingsAmountTolerance');
+    // Helper to set value/checked safely
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+    const setChecked = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
 
-    if (dateRangeEl) dateRangeEl.value = currentSettings.defaultDateRange;
-    if (amountToleranceEl) amountToleranceEl.value = currentSettings.defaultAmountTolerance;
+    // Matching preferences
+    setVal('settingsDateRange', currentSettings.defaultDateRange);
+    setVal('settingsAmountTolerance', currentSettings.defaultAmountTolerance);
+    setChecked('settingsMatchByCheck', currentSettings.matchByCheck ?? true);
+    setChecked('settingsMatchByDescription', currentSettings.matchByDescription ?? false);
+    setVal('settingsMinConfidence', currentSettings.minConfidence ?? 50);
+
+    // Data parsing
+    setChecked('settingsAutoDetectHeaders', currentSettings.autoDetectHeaders ?? true);
+    setChecked('settingsAbsoluteAmounts', currentSettings.absoluteAmounts ?? true);
+    setChecked('settingsSkipExpenditure', currentSettings.skipExpenditure ?? true);
+    setVal('settingsDateParsing', currentSettings.dateParsing ?? 'MDY');
 
     // Display preferences
-    const dateFormatEl = document.getElementById('settingsDateFormat');
-    const currencyFormatEl = document.getElementById('settingsCurrencyFormat');
-    const themeEl = document.getElementById('settingsTheme');
+    setVal('settingsDateFormat', currentSettings.dateFormat);
+    setVal('settingsCurrencyFormat', currentSettings.currencyFormat);
+    setVal('settingsTheme', currentSettings.theme);
+    setVal('settingsResultsPerPage', currentSettings.resultsPerPage ?? 100);
+    setChecked('settingsShowConfidence', currentSettings.showConfidenceScores ?? true);
+    setChecked('settingsHighlightClose', currentSettings.highlightClose ?? true);
 
-    if (dateFormatEl) dateFormatEl.value = currentSettings.dateFormat;
-    if (currencyFormatEl) currencyFormatEl.value = currentSettings.currencyFormat;
-    if (themeEl) themeEl.value = currentSettings.theme;
-
-    // Export preferences
-    const exportFormatEl = document.getElementById('settingsExportFormat');
-    const autoSaveEl = document.getElementById('settingsAutoSave');
-    const showConfidenceEl = document.getElementById('settingsShowConfidence');
-
-    if (exportFormatEl) exportFormatEl.value = currentSettings.exportFormat;
-    if (autoSaveEl) autoSaveEl.checked = currentSettings.autoSaveEnabled;
-    if (showConfidenceEl) showConfidenceEl.checked = currentSettings.showConfidenceScores;
+    // Export & Save
+    setVal('settingsExportFormat', currentSettings.exportFormat);
+    setChecked('settingsExportUnmatched', currentSettings.exportUnmatched ?? true);
+    setChecked('settingsAutoSave', currentSettings.autoSaveEnabled ?? false);
 
     // Also apply defaults to main reconciliation view
     applyDefaultsToReconciliation();
@@ -127,14 +146,28 @@ function applyTheme(theme) {
  */
 function gatherSettingsFromUI() {
     return {
+        // Matching preferences
         defaultDateRange: parseInt(document.getElementById('settingsDateRange')?.value) || 3,
         defaultAmountTolerance: parseFloat(document.getElementById('settingsAmountTolerance')?.value) || 0,
+        matchByCheck: document.getElementById('settingsMatchByCheck')?.checked ?? true,
+        matchByDescription: document.getElementById('settingsMatchByDescription')?.checked ?? false,
+        minConfidence: parseInt(document.getElementById('settingsMinConfidence')?.value) || 50,
+        // Data parsing
+        autoDetectHeaders: document.getElementById('settingsAutoDetectHeaders')?.checked ?? true,
+        absoluteAmounts: document.getElementById('settingsAbsoluteAmounts')?.checked ?? true,
+        skipExpenditure: document.getElementById('settingsSkipExpenditure')?.checked ?? true,
+        dateParsing: document.getElementById('settingsDateParsing')?.value || 'MDY',
+        // Display preferences
         dateFormat: document.getElementById('settingsDateFormat')?.value || 'MM/DD/YYYY',
         currencyFormat: document.getElementById('settingsCurrencyFormat')?.value || 'USD',
         theme: document.getElementById('settingsTheme')?.value || 'light',
+        resultsPerPage: parseInt(document.getElementById('settingsResultsPerPage')?.value) || 100,
+        showConfidenceScores: document.getElementById('settingsShowConfidence')?.checked ?? true,
+        highlightClose: document.getElementById('settingsHighlightClose')?.checked ?? true,
+        // Export & Save
         exportFormat: document.getElementById('settingsExportFormat')?.value || 'xlsx',
-        autoSaveEnabled: document.getElementById('settingsAutoSave')?.checked || false,
-        showConfidenceScores: document.getElementById('settingsShowConfidence')?.checked ?? true
+        exportUnmatched: document.getElementById('settingsExportUnmatched')?.checked ?? true,
+        autoSaveEnabled: document.getElementById('settingsAutoSave')?.checked ?? false
     };
 }
 
@@ -178,6 +211,16 @@ async function saveSettings() {
 }
 
 /**
+ * Reset settings to defaults
+ */
+function resetSettings() {
+    currentSettings = getDefaultSettings();
+    applySettingsToUI();
+    applyTheme(currentSettings.theme);
+    console.log('[SETTINGS] Reset to defaults');
+}
+
+/**
  * Get current settings
  */
 function getCurrentSettings() {
@@ -205,6 +248,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.getElementById('saveSettings');
     if (saveBtn) {
         saveBtn.addEventListener('click', saveSettings);
+    }
+
+    // Reset settings button
+    const resetBtn = document.getElementById('resetSettings');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if (confirm('Reset all settings to their default values?')) {
+                resetSettings();
+            }
+        });
     }
 
     // Theme change - apply immediately

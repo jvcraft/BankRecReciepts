@@ -31,7 +31,7 @@
         <!-- Main Header (shown when not logged in or on reconciliation view) -->
         <header id="mainHeader">
             <h1>Reconciliation Wizard</h1>
-            <p class="subtitle">Upload files to compare and reconcile bank statements with general ledger entries</p>
+            <p class="subtitle">Upload and compare bank statements with general ledger entries</p>
         </header>
 
         <!-- Reconciliation Section -->
@@ -39,7 +39,14 @@
             <!-- File Upload Section -->
             <section class="upload-section">
                 <div class="upload-card">
-                    <h2>Upload Files</h2>
+                    <h2>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2" style="vertical-align: -3px; margin-right: 0.5rem;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        Upload Files
+                    </h2>
                     <div class="file-inputs">
                         <div class="file-input-group">
                             <label for="bankFile">
@@ -61,7 +68,13 @@
                 </div>
 
                 <div class="settings-card">
-                    <h2>Define Matching Parameters</h2>
+                    <h2>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary-color)" stroke-width="2" style="vertical-align: -3px; margin-right: 0.5rem;">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                        Matching Parameters
+                    </h2>
                     <div class="settings-grid">
                         <div class="setting-item">
                             <label for="dateRange">Date Range (days)</label>
@@ -246,7 +259,13 @@
             <h2>Settings</h2>
 
             <div class="settings-group">
-                <h3>Default Matching Preferences</h3>
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 0.5rem;">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09c-.658.003-1.25.396-1.51 1z"/>
+                    </svg>
+                    Default Matching Preferences
+                </h3>
                 <div class="settings-row">
                     <div class="settings-label">
                         <h4>Default Date Range</h4>
@@ -265,14 +284,115 @@
                         <input type="number" id="settingsAmountTolerance" value="0.00" min="0" step="0.01" />
                     </div>
                 </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Match by Check Number</h4>
+                        <p>Prioritize check number matching when available</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsMatchByCheck" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Match by Description</h4>
+                        <p>Use description similarity as a matching factor</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsMatchByDescription" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Minimum Confidence Threshold</h4>
+                        <p>Only show matches above this confidence level (%)</p>
+                    </div>
+                    <div class="settings-control">
+                        <input type="number" id="settingsMinConfidence" value="50" min="0" max="100" step="5" />
+                    </div>
+                </div>
             </div>
 
             <div class="settings-group">
-                <h3>Display Preferences</h3>
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 0.5rem;">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Data Parsing
+                </h3>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Auto-detect Headers</h4>
+                        <p>Automatically skip metadata rows and find column headers</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsAutoDetectHeaders" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Handle Negative Amounts</h4>
+                        <p>Treat negative debits/credits as absolute values</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsAbsoluteAmounts" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Skip GL Expenditure Entries</h4>
+                        <p>Exclude double-entry expenditure rows from GL data</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsSkipExpenditure" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Date Parsing Preference</h4>
+                        <p>How ambiguous dates (e.g., 01/02/2025) are interpreted</p>
+                    </div>
+                    <div class="settings-control">
+                        <select id="settingsDateParsing">
+                            <option value="MDY">Month/Day/Year (US)</option>
+                            <option value="DMY">Day/Month/Year (EU)</option>
+                            <option value="YMD">Year/Month/Day (ISO)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 0.5rem;">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
+                    Display Preferences
+                </h3>
                 <div class="settings-row">
                     <div class="settings-label">
                         <h4>Date Format</h4>
-                        <p>How dates are displayed</p>
+                        <p>How dates are displayed in results</p>
                     </div>
                     <div class="settings-control">
                         <select id="settingsDateFormat">
@@ -290,8 +410,9 @@
                     <div class="settings-control">
                         <select id="settingsCurrencyFormat">
                             <option value="USD">USD ($)</option>
-                            <option value="EUR">EUR (€)</option>
-                            <option value="GBP">GBP (£)</option>
+                            <option value="EUR">EUR (&euro;)</option>
+                            <option value="GBP">GBP (&pound;)</option>
+                            <option value="CAD">CAD (C$)</option>
                         </select>
                     </div>
                 </div>
@@ -304,14 +425,60 @@
                         <select id="settingsTheme">
                             <option value="light">Light</option>
                             <option value="dark">Dark</option>
-                            <option value="system">System Theme</option>
+                            <option value="system">System Default</option>
                         </select>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Results Per Page</h4>
+                        <p>Maximum rows shown in results table</p>
+                    </div>
+                    <div class="settings-control">
+                        <select id="settingsResultsPerPage">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="250">250</option>
+                            <option value="500">500</option>
+                            <option value="0">Show All</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Show Confidence Scores</h4>
+                        <p>Display match confidence percentages in results</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsShowConfidence" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Highlight Close Matches</h4>
+                        <p>Visually highlight matches that are close but not exact</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsHighlightClose" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
             </div>
 
             <div class="settings-group">
-                <h3>Export Preferences</h3>
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 0.5rem;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Export &amp; Save
+                </h3>
                 <div class="settings-row">
                     <div class="settings-label">
                         <h4>Default Export Format</h4>
@@ -326,8 +493,20 @@
                 </div>
                 <div class="settings-row">
                     <div class="settings-label">
-                        <h4>Auto-save</h4>
-                        <p>Automatically save reconciliations</p>
+                        <h4>Include Unmatched in Export</h4>
+                        <p>Export unmatched items alongside matched transactions</p>
+                    </div>
+                    <div class="settings-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="settingsExportUnmatched" checked />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-label">
+                        <h4>Auto-save Reconciliations</h4>
+                        <p>Automatically save after completing reconciliation</p>
                     </div>
                     <div class="settings-control">
                         <label class="toggle-switch">
@@ -336,23 +515,14 @@
                         </label>
                     </div>
                 </div>
-                <div class="settings-row">
-                    <div class="settings-label">
-                        <h4>Show Confidence Scores</h4>
-                        <p>Display match confidence percentages</p>
-                    </div>
-                    <div class="settings-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="settingsShowConfidence" checked />
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
             </div>
 
-            <div style="margin-top: 1.5rem;">
+            <div class="settings-actions">
                 <button id="saveSettings" class="primary-btn" style="width: auto; padding: 0.75rem 2rem;">
                     Save Settings
+                </button>
+                <button id="resetSettings" class="secondary-btn" style="padding: 0.75rem 1.5rem;">
+                    Reset to Defaults
                 </button>
             </div>
         </section>
