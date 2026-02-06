@@ -11,9 +11,273 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Serif:opsz,wght@8..144,300;8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f1f5f9;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Subtle dot grid background */
+        .login-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(circle, rgba(30, 64, 175, 0.05) 1px, transparent 1px);
+            background-size: 28px 28px;
+            pointer-events: none;
+        }
+
+        /* Soft color orbs */
+        .login-bg-shape {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            filter: blur(60px);
+        }
+
+        .login-bg-shape:nth-child(1) {
+            width: 400px;
+            height: 400px;
+            top: -10%;
+            right: -5%;
+            background: rgba(30, 64, 175, 0.06);
+            animation: login-float 18s ease-in-out infinite;
+        }
+
+        .login-bg-shape:nth-child(2) {
+            width: 300px;
+            height: 300px;
+            bottom: -8%;
+            left: -5%;
+            background: rgba(6, 182, 212, 0.05);
+            animation: login-float 22s ease-in-out infinite reverse;
+        }
+
+        .login-bg-shape:nth-child(3) {
+            width: 200px;
+            height: 200px;
+            top: 50%;
+            left: 60%;
+            background: rgba(139, 92, 246, 0.04);
+            animation: login-float 15s ease-in-out infinite;
+            animation-delay: -5s;
+        }
+
+        @keyframes login-float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(-20px, 15px) scale(1.05); }
+            66% { transform: translate(10px, -10px) scale(0.97); }
+        }
+
+        .login-card {
+            background: #ffffff;
+            border-radius: 18px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
+            width: 100%;
+            max-width: 420px;
+            padding: 2.5rem;
+            position: relative;
+            z-index: 1;
+            animation: card-enter 0.5s ease-out;
+        }
+
+        /* Accent line at top of card */
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 2rem;
+            right: 2rem;
+            height: 3px;
+            background: #1e40af;
+            border-radius: 0 0 3px 3px;
+        }
+
+        @keyframes card-enter {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-header h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #1e40af;
+            margin-bottom: 0.5rem;
+        }
+
+        .login-header p {
+            color: #64748b;
+            font-size: 0.95rem;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #334155;
+        }
+
+        .form-group input {
+            padding: 0.8rem 1rem;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 10px;
+            font-family: 'Roboto Serif', Georgia, serif;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            background: #f8fafc;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #1e40af;
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+            background: #ffffff;
+        }
+
+        .form-group input::placeholder {
+            color: #94a3b8;
+        }
+
+        .primary-btn {
+            margin-top: 0.5rem;
+            padding: 0.9rem 1.5rem;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            background: #1e40af;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Roboto Serif', Georgia, serif;
+            box-shadow: 0 2px 8px rgba(30, 64, 175, 0.2);
+        }
+
+        .primary-btn:hover:not(:disabled) {
+            background: #1e3a8a;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25);
+        }
+
+        .primary-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .primary-btn:disabled {
+            background: #cbd5e1;
+            color: #94a3b8;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .login-footer {
+            text-align: center;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .login-footer p {
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+
+        .login-footer a {
+            color: #1e40af;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .login-footer a:hover {
+            text-decoration: underline;
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+
+        .back-link a {
+            color: #64748b;
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            transition: color 0.2s ease;
+        }
+
+        .back-link a:hover {
+            color: #1e40af;
+        }
+
+        /* Alert overrides for login context */
+        .alert {
+            border-radius: 10px;
+            font-size: 0.875rem;
+        }
+
+        /* Loading state */
+        .btn-loading {
+            position: relative;
+            color: transparent !important;
+        }
+
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                padding: 1rem;
+            }
+
+            .login-card {
+                padding: 1.75rem;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="login-container">
+        <div class="login-bg-shape"></div>
+        <div class="login-bg-shape"></div>
+        <div class="login-bg-shape"></div>
+
         <div class="login-card">
             <div class="login-header">
                 <h1>Bank Reconciliation Wizard</h1>
@@ -51,7 +315,7 @@
             </form>
 
             <div id="forgotPasswordLink" style="text-align: center; margin-top: 1rem;">
-                <a href="#" id="forgotPasswordBtn" style="color: var(--primary-color); text-decoration: none; font-size: 0.875rem;">
+                <a href="#" id="forgotPasswordBtn" style="color: #1e40af; text-decoration: none; font-size: 0.85rem; font-weight: 500;">
                     Forgot your password?
                 </a>
             </div>
@@ -64,13 +328,22 @@
             </div>
 
             <!-- Demo Mode Banner -->
-            <div id="demoBanner" style="margin-top: 1.5rem; padding: 1rem; background: var(--warning-light); border: 1px solid var(--warning-color); border-radius: var(--radius-md); display: none;">
-                <p style="font-size: 0.875rem; color: var(--warning-color); margin: 0;">
-                    <strong>Demo Mode:</strong> Firebase is not configured. The app will work with limited functionality.
-                    <a href="#" id="demoModeBtn" style="color: var(--primary-color); font-weight: 500;">
+            <div id="demoBanner" style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border: 1px solid #b45309; border-radius: 10px; display: none;">
+                <p style="font-size: 0.85rem; color: #92400e; margin: 0;">
+                    <strong>Demo Mode:</strong> Firebase is not configured.
+                    <a href="#" id="demoModeBtn" style="color: #1e40af; font-weight: 600;">
                         Continue in Demo Mode
                     </a>
                 </p>
+            </div>
+
+            <div class="back-link">
+                <a href="home.html">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    Back to home
+                </a>
             </div>
         </div>
     </div>
