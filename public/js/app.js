@@ -23,6 +23,9 @@ class BankReconciliation {
             searchText: ''
         };
         this.currentTab = 'matched';
+        this.smartMatchSuggestions = []; // Smart match suggestions
+        this.pageSize = 15; // Items per page: 15, 50, or Infinity (All)
+        this.currentPage = 1;
         this.init();
     }
 
@@ -96,6 +99,19 @@ class BankReconciliation {
         });
 
         document.getElementById('clearFilters')?.addEventListener('click', () => this.clearFilters());
+
+        // Pagination controls
+        document.querySelectorAll('.page-size-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const size = btn.dataset.size;
+                this.pageSize = size === 'all' ? Infinity : parseInt(size);
+                this.currentPage = 1;
+                // Update active state
+                document.querySelectorAll('.page-size-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.switchTab(this.currentTab);
+            });
+        });
     }
 
     handleFileSelect(event, type) {
@@ -1347,6 +1363,549 @@ class BankReconciliation {
         return types.length > 0 ? types.join(' + ') : 'Amount Match';
     }
 
+    // ========================================
+    // Smart Match (Experimental) - Algorithm
+    // ========================================
+
+    getSmartMatchLearning() {
+        try {
+            const raw = localStorage.getItem('bankRecSmartMatchLearning');
+            return raw ? JSON.parse(raw) : this.createEmptyLearningData();
+        } catch (e) {
+            console.warn('[SMART] Failed to load learning data:', e);
+            return this.createEmptyLearningData();
+        }
+    }
+
+    saveSmartMatchLearning(data) {
+        data.lastUpdated = new Date().toISOString();
+        if (data.feedbackLog && data.feedbackLog.length > 200) {
+            data.feedbackLog = data.feedbackLog.slice(-200);
+        }
+        localStorage.setItem('bankRecSmartMatchLearning', JSON.stringify(data));
+    }
+
+    createEmptyLearningData() {
+        return {
+            version: 1,
+            lastUpdated: new Date().toISOString(),
+            totalAccepted: 0,
+            totalDenied: 0,
+            patterns: { descToAccount: {}, amountToAccount: {}, descToDesc: {} },
+            feedbackLog: []
+        };
+    }
+
+    normalizeForLearning(str) {
+        return (str || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim().replace(/\s+/g, ' ');
+    }
+
+    amountBucket(amount) {
+        const abs = Math.abs(amount);
+        if (abs < 100) return '0-100';
+        if (abs < 500) return '100-500';
+        if (abs < 1000) return '500-1000';
+        if (abs < 2000) return '1000-2000';
+        if (abs < 5000) return '2000-5000';
+        if (abs < 10000) return '5000-10000';
+        if (abs < 50000) return '10000-50000';
+        return '50000+';
+    }
+
+    calculateAmountScore(sourceAmount, targetAmount) {
+        const diff = Math.abs(sourceAmount - targetAmount);
+        const pctDiff = sourceAmount > 0 ? diff / sourceAmount : (diff === 0 ? 0 : 1);
+        if (diff <= 0.01) return 1.0;
+        if (pctDiff <= 0.01) return 0.85;
+        if (pctDiff <= 0.05) return 0.6;
+        if (pctDiff <= 0.10) return 0.3;
+        return 0.0;
+    }
+
+    calculateTextScore(sourceDesc, targetDesc) {
+        if (!sourceDesc || !targetDesc) return 0;
+        const normalize = (str) => str.toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(t => t.length > 2);
+        const sourceTokens = new Set(normalize(sourceDesc));
+        const targetTokens = new Set(normalize(targetDesc));
+        if (sourceTokens.size === 0 || targetTokens.size === 0) return 0;
+        let shared = 0;
+        for (const token of sourceTokens) {
+            if (targetTokens.has(token)) shared++;
+        }
+        const union = new Set([...sourceTokens, ...targetTokens]).size;
+        return union > 0 ? shared / union : 0;
+    }
+
+    calculateDateScore(sourceDate, targetDate, maxDays) {
+        if (!sourceDate || !targetDate) return 0.25;
+        const date1 = sourceDate instanceof Date ? sourceDate : new Date(sourceDate);
+        const date2 = targetDate instanceof Date ? targetDate : new Date(targetDate);
+        if (isNaN(date1.getTime()) || isNaN(date2.getTime())) return 0.25;
+        const daysDiff = Math.abs((date1 - date2) / (1000 * 60 * 60 * 24));
+        if (daysDiff < 1) return 1.0;
+        const halfLife = Math.max(maxDays, 3) / 2;
+        return Math.max(Math.exp(-daysDiff / halfLife), 0);
+    }
+
+    calculateRefScore(bankTx, glEntry) {
+        const bankCheck = (bankTx.checkNumber || '').replace(/\D/g, '');
+        const glCheck = (glEntry.checkNumber || glEntry.refNumber || '').replace(/\D/g, '');
+        const glAccount = (glEntry.accountNumber || '').replace(/\D/g, '');
+
+        if (bankCheck && bankCheck.length >= 3) {
+            if (glCheck && glCheck === bankCheck) return 1.0;
+            if (glAccount && glAccount.includes(bankCheck)) return 0.9;
+            if (glCheck && glCheck.slice(-4) === bankCheck.slice(-4)) return 0.6;
+        }
+
+        const bankDesc = (bankTx.description || '') + ' ' + (bankTx.memo || '');
+        const glDesc = (glEntry.description || '');
+        const bankPO = bankDesc.match(/PO[:#]?\s*([\d-]+)/i);
+        const glPO = glDesc.match(/PO[:#]?\s*([\d-]+)/i);
+        if (bankPO && glPO && bankPO[1] === glPO[1]) return 0.8;
+
+        return 0;
+    }
+
+    calculateLearningBias(bankTx, glEntry) {
+        const learningData = this.getSmartMatchLearning();
+        if (!learningData || !learningData.patterns) return 0;
+
+        let bias = 0;
+        const patterns = learningData.patterns;
+        const descKey = this.normalizeForLearning(bankTx.description);
+        const acctKey = (glEntry.accountNumber || '').trim();
+        const glDescKey = this.normalizeForLearning(glEntry.description);
+        const amtBucket = this.amountBucket(bankTx.amount);
+
+        if (patterns.descToAccount && patterns.descToAccount[descKey]) {
+            const rec = patterns.descToAccount[descKey][acctKey];
+            if (rec) {
+                const net = (rec.accepted || 0) - (rec.denied || 0);
+                bias += Math.tanh(net * 0.3) * 0.06;
+            }
+        }
+
+        if (patterns.amountToAccount && patterns.amountToAccount[amtBucket]) {
+            const rec = patterns.amountToAccount[amtBucket][acctKey];
+            if (rec) {
+                const net = (rec.accepted || 0) - (rec.denied || 0);
+                bias += Math.tanh(net * 0.2) * 0.02;
+            }
+        }
+
+        if (patterns.descToDesc && patterns.descToDesc[descKey]) {
+            const rec = patterns.descToDesc[descKey][glDescKey];
+            if (rec) {
+                const net = (rec.accepted || 0) - (rec.denied || 0);
+                bias += Math.tanh(net * 0.3) * 0.02;
+            }
+        }
+
+        return Math.max(-0.10, Math.min(0.10, bias));
+    }
+
+    findSubsetMatches(sourceAmount, targets, maxItems = 3) {
+        const results = [];
+        const tolerance = sourceAmount * 0.01;
+        const getAmt = (item) => Math.abs(item.amount || item.amountCredit || item.amountDebit || item.debit || item.credit || 0);
+
+        for (let i = 0; i < targets.length; i++) {
+            for (let j = i + 1; j < targets.length; j++) {
+                const sum = getAmt(targets[i]) + getAmt(targets[j]);
+                if (Math.abs(sum - sourceAmount) <= tolerance) {
+                    results.push({ indices: [i, j], items: [targets[i], targets[j]], sum, diff: Math.abs(sum - sourceAmount) });
+                }
+            }
+        }
+
+        const cap = Math.min(targets.length, 50);
+        if (maxItems >= 3) {
+            for (let i = 0; i < cap; i++) {
+                for (let j = i + 1; j < cap; j++) {
+                    for (let k = j + 1; k < cap; k++) {
+                        const sum = getAmt(targets[i]) + getAmt(targets[j]) + getAmt(targets[k]);
+                        if (Math.abs(sum - sourceAmount) <= tolerance) {
+                            results.push({ indices: [i, j, k], items: [targets[i], targets[j], targets[k]], sum, diff: Math.abs(sum - sourceAmount) });
+                        }
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    buildReasons(bankTx, glEntry, scores) {
+        const reasons = [];
+        const diff = Math.abs(Math.abs(bankTx.amount || 0) - Math.abs(glEntry.amount || glEntry.debit || 0));
+
+        if (scores.amount >= 1.0) {
+            reasons.push({ icon: '$', text: 'Exact amount match', score: 'Perfect' });
+        } else if (scores.amount >= 0.85) {
+            reasons.push({ icon: '$', text: `Amount within 1% ($${diff.toFixed(2)} diff)`, score: 'Strong' });
+        } else if (scores.amount >= 0.3) {
+            reasons.push({ icon: '$', text: `Amount within 10% ($${diff.toFixed(2)} diff)`, score: 'Weak' });
+        }
+
+        if (scores.text >= 0.5) {
+            reasons.push({ icon: 'T', text: 'Description keywords match', score: 'Strong' });
+        } else if (scores.text > 0.1) {
+            reasons.push({ icon: 'T', text: 'Partial description overlap', score: 'Weak' });
+        }
+
+        if (scores.date >= 0.9) {
+            reasons.push({ icon: 'D', text: 'Same day or within 1 day', score: 'Strong' });
+        } else if (scores.date >= 0.5) {
+            reasons.push({ icon: 'D', text: 'Close date proximity', score: 'Moderate' });
+        }
+
+        if (scores.ref >= 0.9) {
+            reasons.push({ icon: '#', text: 'Check/reference number match', score: 'Perfect' });
+        } else if (scores.ref >= 0.6) {
+            reasons.push({ icon: '#', text: 'Partial reference match', score: 'Moderate' });
+        }
+
+        if (scores.learningBias > 0.02) {
+            reasons.push({ icon: 'L', text: 'Boosted by past acceptances', score: 'Learned' });
+        } else if (scores.learningBias < -0.02) {
+            reasons.push({ icon: 'L', text: 'Penalized by past denials', score: 'Learned' });
+        }
+
+        return reasons;
+    }
+
+    // ========================================
+    // Smart Match - Orchestration & UI
+    // ========================================
+
+    generateSmartMatchSuggestions() {
+        const loading = document.getElementById('smartMatchLoading');
+        const container = document.getElementById('smartMatchSuggestions');
+        const emptyState = document.getElementById('smartMatchEmpty');
+
+        loading.style.display = 'flex';
+        container.innerHTML = '';
+        emptyState.style.display = 'none';
+
+        setTimeout(() => {
+            const source = this.manualMatchSource;
+            const sourceItem = source.type === 'bank' ? this.unmatchedBank[source.idx] : this.unmatchedGL[source.idx];
+            const targetItems = source.type === 'bank' ? this.unmatchedGL : this.unmatchedBank;
+            const sourceAmount = Math.abs(sourceItem.amount || sourceItem.amountCredit || sourceItem.amountDebit || 0);
+
+            const suggestions = [];
+
+            targetItems.forEach((target, idx) => {
+                const targetAmount = Math.abs(target.amount || target.amountCredit || target.amountDebit || target.debit || target.credit || 0);
+                const bankTx = source.type === 'bank' ? sourceItem : target;
+                const glEntry = source.type === 'bank' ? target : sourceItem;
+
+                const scores = {
+                    amount: this.calculateAmountScore(sourceAmount, targetAmount),
+                    text: this.calculateTextScore(
+                        (sourceItem.description || '') + ' ' + (sourceItem.memo || ''),
+                        (target.description || '') + ' ' + (target.accountDescription || '')
+                    ),
+                    date: this.calculateDateScore(sourceItem.date, target.date, this.settings.dateRange),
+                    ref: this.calculateRefScore(bankTx, glEntry),
+                    learningBias: this.calculateLearningBias(bankTx, glEntry)
+                };
+
+                const finalScore = (0.40 * scores.amount) + (0.20 * scores.text) + (0.15 * scores.date) + (0.15 * scores.ref) + scores.learningBias;
+
+                if (finalScore >= 0.40) {
+                    suggestions.push({
+                        score: finalScore,
+                        scores,
+                        bankTx,
+                        glEntry,
+                        targetIndex: idx,
+                        isSplit: false,
+                        reasons: this.buildReasons(bankTx, glEntry, scores)
+                    });
+                }
+            });
+
+            // Subset-sum splits if no high-confidence single match
+            if (!suggestions.some(s => s.score >= 0.85)) {
+                const subsets = this.findSubsetMatches(sourceAmount, targetItems);
+                subsets.forEach(subset => {
+                    suggestions.push({
+                        score: Math.min(0.40 * 0.95 + 0.10, 0.80),
+                        scores: { amount: 0.95, text: 0, date: 0, ref: 0, learningBias: 0 },
+                        bankTx: source.type === 'bank' ? sourceItem : subset.items[0],
+                        glEntry: source.type === 'bank' ? subset.items[0] : sourceItem,
+                        targetIndices: subset.indices,
+                        targetItems: subset.items,
+                        isSplit: true,
+                        reasons: [{ icon: '$', text: `${subset.items.length} items sum to ${this.formatCurrency(subset.sum)} (target: ${this.formatCurrency(sourceAmount)})`, score: 'Split' }]
+                    });
+                });
+            }
+
+            suggestions.sort((a, b) => b.score - a.score);
+            this.smartMatchSuggestions = suggestions.slice(0, 5);
+
+            loading.style.display = 'none';
+            this.renderSmartMatchSuggestions();
+        }, 100);
+    }
+
+    renderSmartMatchSuggestions() {
+        const container = document.getElementById('smartMatchSuggestions');
+        const emptyState = document.getElementById('smartMatchEmpty');
+        const stats = document.getElementById('smartMatchStats');
+
+        if (!this.smartMatchSuggestions || this.smartMatchSuggestions.length === 0) {
+            container.innerHTML = '';
+            emptyState.style.display = 'block';
+            stats.innerHTML = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+        const learningData = this.getSmartMatchLearning();
+        stats.innerHTML = `<span class="smart-stats-label">Learning data: ${learningData.totalAccepted} accepted, ${learningData.totalDenied} denied</span>`;
+
+        const sourceType = this.manualMatchSource.type;
+        container.innerHTML = this.smartMatchSuggestions.map((suggestion, idx) => {
+            const confidenceClass = suggestion.score >= 0.85 ? 'confidence-high' :
+                                   suggestion.score >= 0.60 ? 'confidence-medium' : 'confidence-low';
+            const pct = Math.round(suggestion.score * 100);
+
+            let targetHtml;
+            if (suggestion.isSplit) {
+                const rows = suggestion.targetItems.map(item => {
+                    const amt = Math.abs(item.amount || item.debit || item.credit || 0);
+                    return `<tr>
+                        <td>${this.formatDate(item.date)}</td>
+                        <td title="${this.escapeHtml(item.description || '')}">${this.escapeHtml(this.truncate(item.description || '', 30))}</td>
+                        <td>${this.escapeHtml(item.accountNumber || '')}</td>
+                        <td class="target-amount">${this.formatCurrency(amt)}</td>
+                    </tr>`;
+                }).join('');
+                const splitTotal = suggestion.targetItems.reduce((s, i) => s + Math.abs(i.amount || i.debit || i.credit || 0), 0);
+                targetHtml = `
+                    <div class="smart-match-split-label">Split match: ${suggestion.targetItems.length} items totalling ${this.formatCurrency(splitTotal)}</div>
+                    <table class="smart-target-table">
+                        <thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Amount</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            } else {
+                const item = sourceType === 'bank' ? suggestion.glEntry : suggestion.bankTx;
+                const amt = Math.abs(item.amount || item.debit || item.credit || item.amountCredit || 0);
+                targetHtml = `
+                    <table class="smart-target-table">
+                        <tbody>
+                            <tr><td class="smart-field-label">Date</td><td>${this.formatDate(item.date)}</td></tr>
+                            <tr><td class="smart-field-label">Description</td><td title="${this.escapeHtml(item.description || '')}">${this.escapeHtml(this.truncate(item.description || '', 50))}</td></tr>
+                            ${item.accountNumber ? `<tr><td class="smart-field-label">Account #</td><td>${this.escapeHtml(item.accountNumber)}</td></tr>` : ''}
+                            <tr><td class="smart-field-label">Amount</td><td class="target-amount">${this.formatCurrency(amt)}</td></tr>
+                        </tbody>
+                    </table>`;
+            }
+
+            const reasonsHtml = (suggestion.reasons || []).map(r => `
+                <span class="reason-chip">
+                    <span class="reason-icon">${r.icon}</span>
+                    ${this.escapeHtml(r.text)}
+                </span>
+            `).join('');
+
+            return `
+                <div class="smart-match-card ${confidenceClass}" data-suggestion-idx="${idx}">
+                    <div class="smart-match-card-top">
+                        <div class="confidence-meter ${confidenceClass}">
+                            <div class="confidence-fill" style="width: ${pct}%"></div>
+                        </div>
+                        <span class="confidence-pct ${confidenceClass}">${pct}%</span>
+                    </div>
+                    <div class="smart-match-card-body">
+                        ${targetHtml}
+                        <div class="smart-match-reasons">${reasonsHtml}</div>
+                    </div>
+                    <div class="smart-match-card-actions">
+                        <button class="smart-match-deny-btn" data-smart-deny="${idx}">Deny</button>
+                        <button class="smart-match-accept-btn" data-smart-accept="${idx}">Accept Match</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Attach event listeners
+        container.querySelectorAll('[data-smart-accept]').forEach(btn => {
+            btn.addEventListener('click', () => this.acceptSmartMatch(parseInt(btn.dataset.smartAccept)));
+        });
+        container.querySelectorAll('[data-smart-deny]').forEach(btn => {
+            btn.addEventListener('click', () => this.denySmartMatch(parseInt(btn.dataset.smartDeny)));
+        });
+    }
+
+    acceptSmartMatch(suggestionIndex) {
+        const suggestion = this.smartMatchSuggestions[suggestionIndex];
+        if (!suggestion) return;
+
+        const learningData = this.getSmartMatchLearning();
+        const descKey = this.normalizeForLearning(suggestion.bankTx.description);
+        const acctKey = (suggestion.glEntry.accountNumber || '').trim();
+        const glDescKey = this.normalizeForLearning(suggestion.glEntry.description);
+        const amtBucket = this.amountBucket(suggestion.bankTx.amount);
+
+        // Update descToAccount
+        if (!learningData.patterns.descToAccount[descKey]) learningData.patterns.descToAccount[descKey] = {};
+        if (!learningData.patterns.descToAccount[descKey][acctKey]) learningData.patterns.descToAccount[descKey][acctKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.descToAccount[descKey][acctKey].accepted++;
+
+        // Update amountToAccount
+        if (!learningData.patterns.amountToAccount[amtBucket]) learningData.patterns.amountToAccount[amtBucket] = {};
+        if (!learningData.patterns.amountToAccount[amtBucket][acctKey]) learningData.patterns.amountToAccount[amtBucket][acctKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.amountToAccount[amtBucket][acctKey].accepted++;
+
+        // Update descToDesc
+        if (!learningData.patterns.descToDesc[descKey]) learningData.patterns.descToDesc[descKey] = {};
+        if (!learningData.patterns.descToDesc[descKey][glDescKey]) learningData.patterns.descToDesc[descKey][glDescKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.descToDesc[descKey][glDescKey].accepted++;
+
+        learningData.totalAccepted++;
+        learningData.feedbackLog.push({
+            timestamp: new Date().toISOString(),
+            action: 'accepted',
+            bankDesc: suggestion.bankTx.description,
+            bankAmount: suggestion.bankTx.amount,
+            glAccount: acctKey,
+            glDesc: suggestion.glEntry.description,
+            score: suggestion.score
+        });
+
+        this.saveSmartMatchLearning(learningData);
+        this.executeSmartMatchAccept(suggestion);
+    }
+
+    executeSmartMatchAccept(suggestion) {
+        const source = this.manualMatchSource;
+
+        if (suggestion.isSplit) {
+            const sortedIndices = [...suggestion.targetIndices].sort((a, b) => b - a);
+            const targetItems = suggestion.targetItems;
+
+            if (source.type === 'bank') {
+                const bankItem = this.unmatchedBank[source.idx];
+                sortedIndices.forEach(idx => this.unmatchedGL.splice(idx, 1));
+                this.unmatchedBank.splice(source.idx, 1);
+
+                this.matchedTransactions.push({
+                    bankTransaction: bankItem,
+                    glEntry: {
+                        accountNumber: targetItems.map(g => g.accountNumber).join(', '),
+                        description: `[${targetItems.length} items combined] ` + targetItems.map(g => g.description).filter(Boolean).join('; '),
+                        type: 'Combined',
+                        date: targetItems[0].date,
+                        amount: targetItems.reduce((s, i) => s + Math.abs(i.amount || i.debit || i.credit || 0), 0),
+                        combinedItems: targetItems
+                    },
+                    matchScore: suggestion.score,
+                    matchType: `Smart Match (${targetItems.length}-way split)`,
+                    isManual: true,
+                    isSmartMatch: true,
+                    isMultiMatch: true,
+                    matchedCount: targetItems.length
+                });
+            } else {
+                const glItem = this.unmatchedGL[source.idx];
+                sortedIndices.forEach(idx => this.unmatchedBank.splice(idx, 1));
+                this.unmatchedGL.splice(source.idx, 1);
+
+                this.matchedTransactions.push({
+                    bankTransaction: {
+                        description: `[${targetItems.length} items combined] ` + targetItems.map(b => b.description).filter(Boolean).join('; '),
+                        date: targetItems[0].date,
+                        amount: targetItems.reduce((s, i) => s + Math.abs(i.amount || i.amountCredit || 0), 0),
+                        combinedItems: targetItems
+                    },
+                    glEntry: glItem,
+                    matchScore: suggestion.score,
+                    matchType: `Smart Match (${targetItems.length}-way split)`,
+                    isManual: true,
+                    isSmartMatch: true,
+                    isMultiMatch: true,
+                    matchedCount: targetItems.length
+                });
+            }
+        } else {
+            let bankItem, glItem;
+            const targetIdx = suggestion.targetIndex;
+
+            if (source.type === 'bank') {
+                bankItem = this.unmatchedBank[source.idx];
+                glItem = this.unmatchedGL[targetIdx];
+                this.unmatchedGL.splice(targetIdx, 1);
+                this.unmatchedBank.splice(source.idx, 1);
+            } else {
+                glItem = this.unmatchedGL[source.idx];
+                bankItem = this.unmatchedBank[targetIdx];
+                this.unmatchedBank.splice(targetIdx, 1);
+                this.unmatchedGL.splice(source.idx, 1);
+            }
+
+            this.matchedTransactions.push({
+                bankTransaction: bankItem,
+                glEntry: glItem,
+                matchScore: suggestion.score,
+                matchType: 'Smart Match',
+                isManual: true,
+                isSmartMatch: true
+            });
+        }
+
+        document.getElementById('manualMatchModal').style.display = 'none';
+        // Reset to existing tab for next open
+        if (typeof switchMatchTab === 'function') switchMatchTab('existing');
+        this.smartMatchSuggestions = [];
+        this.displayResults();
+    }
+
+    denySmartMatch(suggestionIndex) {
+        const suggestion = this.smartMatchSuggestions[suggestionIndex];
+        if (!suggestion) return;
+
+        const learningData = this.getSmartMatchLearning();
+        const descKey = this.normalizeForLearning(suggestion.bankTx.description);
+        const acctKey = (suggestion.glEntry.accountNumber || '').trim();
+        const glDescKey = this.normalizeForLearning(suggestion.glEntry.description);
+        const amtBucket = this.amountBucket(suggestion.bankTx.amount);
+
+        if (!learningData.patterns.descToAccount[descKey]) learningData.patterns.descToAccount[descKey] = {};
+        if (!learningData.patterns.descToAccount[descKey][acctKey]) learningData.patterns.descToAccount[descKey][acctKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.descToAccount[descKey][acctKey].denied++;
+
+        if (!learningData.patterns.amountToAccount[amtBucket]) learningData.patterns.amountToAccount[amtBucket] = {};
+        if (!learningData.patterns.amountToAccount[amtBucket][acctKey]) learningData.patterns.amountToAccount[amtBucket][acctKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.amountToAccount[amtBucket][acctKey].denied++;
+
+        if (!learningData.patterns.descToDesc[descKey]) learningData.patterns.descToDesc[descKey] = {};
+        if (!learningData.patterns.descToDesc[descKey][glDescKey]) learningData.patterns.descToDesc[descKey][glDescKey] = { accepted: 0, denied: 0 };
+        learningData.patterns.descToDesc[descKey][glDescKey].denied++;
+
+        learningData.totalDenied++;
+        learningData.feedbackLog.push({
+            timestamp: new Date().toISOString(),
+            action: 'denied',
+            bankDesc: suggestion.bankTx.description,
+            bankAmount: suggestion.bankTx.amount,
+            glAccount: acctKey,
+            glDesc: suggestion.glEntry.description,
+            score: suggestion.score
+        });
+
+        this.saveSmartMatchLearning(learningData);
+
+        this.smartMatchSuggestions.splice(suggestionIndex, 1);
+        this.renderSmartMatchSuggestions();
+    }
+
     updateProgress(percent, text) {
         document.getElementById('progressFill').style.width = percent + '%';
         document.getElementById('progressText').textContent = text;
@@ -1378,6 +1937,10 @@ class BankReconciliation {
     }
 
     switchTab(tab) {
+        // Reset page to 1 when switching tabs
+        if (this.currentTab !== tab) {
+            this.currentPage = 1;
+        }
         this.currentTab = tab;
 
         // Update tab buttons
@@ -1392,26 +1955,92 @@ class BankReconciliation {
             case 'matched':
                 title = 'Matched Transactions';
                 data = this.matchedTransactions;
-                headers = ['Bank Date', 'Description', 'Check #', 'Bank Amount', 'GL Account', 'GL Amount', 'Match Type', 'Actions'];
-                this.renderMatchedTable(data, headers);
+                this.renderMatchedTable(data);
                 break;
 
             case 'unmatched-bank':
                 title = 'Unmatched Bank Transactions';
                 data = this.unmatchedBank;
-                headers = ['Date', 'Description', 'Memo', 'Check #', 'Debit', 'Credit', 'Balance', 'Actions'];
-                this.renderUnmatchedBankTable(data, headers);
+                this.renderUnmatchedBankTable(data);
                 break;
 
             case 'unmatched-gl':
                 title = 'Unmatched GL Entries';
                 data = this.unmatchedGL;
-                headers = ['Account Number', 'Description', 'Type', 'Begin Balance', 'Ending Balance', 'Adjustment', 'Actions'];
-                this.renderUnmatchedGLTable(data, headers);
+                this.renderUnmatchedGLTable(data);
                 break;
         }
 
         document.getElementById('resultsTitle').textContent = title;
+    }
+
+    /**
+     * Get paginated slice of data for current page
+     */
+    paginateData(data) {
+        if (this.pageSize === Infinity) return data;
+        const start = (this.currentPage - 1) * this.pageSize;
+        return data.slice(start, start + this.pageSize);
+    }
+
+    /**
+     * Render pagination controls
+     */
+    renderPagination(totalItems) {
+        const container = document.getElementById('paginationControls');
+        const info = document.getElementById('paginationInfo');
+        const nav = document.getElementById('paginationNav');
+        if (!container) return;
+
+        // Only show pagination if there are items
+        if (totalItems === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'flex';
+
+        const totalPages = this.pageSize === Infinity ? 1 : Math.ceil(totalItems / this.pageSize);
+
+        // Clamp current page
+        if (this.currentPage > totalPages) this.currentPage = totalPages;
+        if (this.currentPage < 1) this.currentPage = 1;
+
+        const start = this.pageSize === Infinity ? 1 : (this.currentPage - 1) * this.pageSize + 1;
+        const end = this.pageSize === Infinity ? totalItems : Math.min(this.currentPage * this.pageSize, totalItems);
+
+        info.textContent = `${start}-${end} of ${totalItems}`;
+
+        // Build page nav buttons
+        if (totalPages <= 1) {
+            nav.innerHTML = '';
+            return;
+        }
+
+        let navHtml = '';
+        navHtml += `<button class="page-nav-btn" data-page="prev" ${this.currentPage === 1 ? 'disabled' : ''}>&laquo;</button>`;
+
+        // Show up to 5 page buttons centered around current
+        let startPage = Math.max(1, this.currentPage - 2);
+        let endPage = Math.min(totalPages, startPage + 4);
+        if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+        for (let i = startPage; i <= endPage; i++) {
+            navHtml += `<button class="page-nav-btn ${i === this.currentPage ? 'active' : ''}" data-page="${i}">${i}</button>`;
+        }
+
+        navHtml += `<button class="page-nav-btn" data-page="next" ${this.currentPage === totalPages ? 'disabled' : ''}>&raquo;</button>`;
+        nav.innerHTML = navHtml;
+
+        // Attach listeners
+        nav.querySelectorAll('.page-nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const page = btn.dataset.page;
+                if (page === 'prev') this.currentPage--;
+                else if (page === 'next') this.currentPage++;
+                else this.currentPage = parseInt(page);
+                this.switchTab(this.currentTab);
+            });
+        });
     }
 
     renderMatchedTable(data, headers) {
@@ -1422,8 +2051,9 @@ class BankReconciliation {
             { label: 'Bank Date', key: 'bankDate', sortable: true },
             { label: 'Bank Description', key: 'bankDesc', sortable: true },
             { label: 'Bank Credit', key: 'bankAmount', sortable: true },
-            { label: 'GL Account #', key: 'glAccount', sortable: true },
+            { label: 'GL Date', key: 'glDate', sortable: true },
             { label: 'GL Description', key: 'glDesc', sortable: true },
+            { label: 'GL Account #', key: 'glAccount', sortable: true },
             { label: 'GL Debit', key: 'glAmount', sortable: true },
             { label: 'Match Type', key: 'matchType', sortable: true },
             { label: 'Actions', key: 'actions', sortable: false }
@@ -1433,11 +2063,16 @@ class BankReconciliation {
             `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
         ).join('') + '</tr>';
 
-        // Calculate totals
+        // Calculate totals from ALL data
         const totalBankAmount = data.reduce((sum, m) => sum + Math.abs(m.bankTransaction.amount || 0), 0);
         const totalGLAmount = data.reduce((sum, m) => sum + Math.abs(m.glEntry.amount || m.glEntry.debit || 0), 0);
 
-        tbody.innerHTML = data.map((match, idx) => {
+        // Paginate
+        const pageData = this.paginateData(data);
+        const pageOffset = this.pageSize === Infinity ? 0 : (this.currentPage - 1) * this.pageSize;
+
+        tbody.innerHTML = pageData.map((match, i) => {
+            const idx = pageOffset + i;
             const bank = match.bankTransaction;
             const gl = match.glEntry;
             const bankAmount = bank.amount || bank.amountCredit || 0;
@@ -1452,8 +2087,9 @@ class BankReconciliation {
                     <td>${this.formatDate(bank.date)}</td>
                     <td title="${this.escapeHtml(bank.description)}">${this.escapeHtml(this.truncate(bank.description, 40))}</td>
                     <td class="amount-credit">${this.formatCurrency(bankAmount)}</td>
-                    <td>${this.escapeHtml(gl.accountNumber)}</td>
+                    <td>${this.formatDate(gl.date)}</td>
                     <td title="${this.escapeHtml(gl.description)}">${this.escapeHtml(this.truncate(gl.description, 40))}</td>
+                    <td>${this.escapeHtml(gl.accountNumber)}</td>
                     <td class="amount-debit">${this.formatCurrency(glAmount)}</td>
                     <td>
                         <span class="match-status matched">${this.escapeHtml(match.matchType)}</span>
@@ -1474,6 +2110,7 @@ class BankReconciliation {
                 <td colspan="2" class="total-label">TOTALS (${data.length} transactions)</td>
                 <td class="amount-credit total-value">${this.formatCurrency(totalBankAmount)}</td>
                 <td colspan="2"></td>
+                <td></td>
                 <td class="amount-debit total-value">${this.formatCurrency(totalGLAmount)}</td>
                 <td colspan="2"></td>
             </tr>
@@ -1489,6 +2126,7 @@ class BankReconciliation {
 
         // Attach sorting listeners
         this.attachSortingListeners('matched', data);
+        this.renderPagination(data.length);
     }
 
     truncate(str, length) {
@@ -1525,6 +2163,8 @@ class BankReconciliation {
                     return item.bankTransaction?.description?.toLowerCase() || '';
                 case 'bankAmount':
                     return Math.abs(item.bankTransaction?.amount || item.bankTransaction?.amountCredit || 0);
+                case 'glDate':
+                    return item.glEntry?.date ? new Date(item.glEntry.date).getTime() : 0;
                 case 'glAccount':
                     return item.glEntry?.accountNumber?.toLowerCase() || '';
                 case 'glDesc':
@@ -1541,6 +2181,10 @@ class BankReconciliation {
                     return Math.abs(item.amount || item.amountCredit || item.debit || 0);
                 case 'accountNumber':
                     return item.accountNumber?.toLowerCase() || '';
+                case 'balance':
+                    return Math.abs(item.balance || 0);
+                case 'type':
+                    return item.type?.toLowerCase() || '';
                 default:
                     return '';
             }
@@ -1594,11 +2238,17 @@ class BankReconciliation {
             `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
         ).join('') + '</tr>';
 
-        // Calculate total
+        // Calculate total from ALL data
         const totalAmount = data.reduce((sum, tx) =>
             sum + Math.abs(tx.amountCredit || tx.amount || 0), 0);
 
-        tbody.innerHTML = data.map((tx, idx) => `
+        // Paginate
+        const pageData = this.paginateData(data);
+        const pageOffset = this.pageSize === Infinity ? 0 : (this.currentPage - 1) * this.pageSize;
+
+        tbody.innerHTML = pageData.map((tx, i) => {
+            const idx = pageOffset + i;
+            return `
             <tr>
                 <td>${this.formatDate(tx.date)}</td>
                 <td title="${this.escapeHtml(tx.description)}">${this.escapeHtml(this.truncate(tx.description, 50))}</td>
@@ -1607,8 +2257,8 @@ class BankReconciliation {
                 <td>
                     <button class="action-btn match-btn" data-action="find-match" data-type="bank" data-idx="${idx}">Find Match</button>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
 
         // Add totals row
         tbody.innerHTML += `
@@ -1630,6 +2280,7 @@ class BankReconciliation {
 
         // Attach sorting listeners
         this.attachSortingListeners('unmatched-bank', data);
+        this.renderPagination(data.length);
     }
 
     renderUnmatchedGLTable(data, headers) {
@@ -1637,8 +2288,9 @@ class BankReconciliation {
         const tbody = document.getElementById('resultsTableBody');
 
         const newHeaders = [
-            { label: 'Account Number', key: 'accountNumber', sortable: true },
+            { label: 'Date', key: 'date', sortable: true },
             { label: 'Description', key: 'description', sortable: true },
+            { label: 'Account Number', key: 'accountNumber', sortable: true },
             { label: 'Type', key: 'type', sortable: true },
             { label: 'Debit Amount', key: 'amount', sortable: true },
             { label: 'Actions', key: 'actions', sortable: false }
@@ -1647,26 +2299,33 @@ class BankReconciliation {
             `<th class="${h.sortable ? 'sortable' : ''}" data-sort="${h.key}">${h.label}</th>`
         ).join('') + '</tr>';
 
-        // Calculate total
+        // Calculate total from ALL data
         const totalAmount = data.reduce((sum, entry) =>
             sum + Math.abs(entry.debit || entry.amount || entry.credit || 0), 0);
 
-        tbody.innerHTML = data.map((entry, idx) => `
+        // Paginate
+        const pageData = this.paginateData(data);
+        const pageOffset = this.pageSize === Infinity ? 0 : (this.currentPage - 1) * this.pageSize;
+
+        tbody.innerHTML = pageData.map((entry, i) => {
+            const idx = pageOffset + i;
+            return `
             <tr>
-                <td>${this.escapeHtml(entry.accountNumber)}</td>
+                <td>${this.formatDate(entry.date)}</td>
                 <td title="${this.escapeHtml(entry.description)}">${this.escapeHtml(this.truncate(entry.description, 50))}</td>
+                <td>${this.escapeHtml(entry.accountNumber)}</td>
                 <td>${this.escapeHtml(entry.type)}</td>
                 <td class="amount-debit">${this.formatCurrency(entry.debit || entry.amount || 0)}</td>
                 <td>
                     <button class="action-btn match-btn" data-action="find-match" data-type="gl" data-idx="${idx}">Find Match</button>
                 </td>
-            </tr>
-        `).join('');
+            </tr>`;
+        }).join('');
 
         // Add totals row
         tbody.innerHTML += `
             <tr class="table-footer">
-                <td colspan="3" class="total-label">TOTAL UNMATCHED GL (${data.length} items)</td>
+                <td colspan="4" class="total-label">TOTAL UNMATCHED GL (${data.length} items)</td>
                 <td class="amount-debit total-value">${this.formatCurrency(totalAmount)}</td>
                 <td></td>
             </tr>
@@ -1683,6 +2342,7 @@ class BankReconciliation {
 
         // Attach sorting listeners
         this.attachSortingListeners('unmatched-gl', data);
+        this.renderPagination(data.length);
     }
 
     unmatchTransaction(matchIdx) {
@@ -1771,62 +2431,82 @@ class BankReconciliation {
             diff: Math.abs((item.amount || item.amountCredit || item.amountDebit || item.debit || item.credit || 0) - sourceAmount)
         })).sort((a, b) => a.diff - b.diff);
 
-        list.innerHTML = sortedTargets.map(({item, idx, amount, diff}) => {
+        // Build a table-based layout for candidates
+        let tableHeaders = '';
+        if (sourceType === 'bank') {
+            // Showing GL items - date first, then description, then account, then amount
+            tableHeaders = `
+                <tr>
+                    <th class="candidate-th-check"></th>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Account #</th>
+                    <th>Amount</th>
+                    <th>Difference</th>
+                </tr>`;
+        } else {
+            // Showing Bank items
+            tableHeaders = `
+                <tr>
+                    <th class="candidate-th-check"></th>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Difference</th>
+                </tr>`;
+        }
+
+        const tableRows = sortedTargets.map(({item, idx, amount, diff}) => {
             const matchQuality = diff === 0 ? 'exact-match' : diff < sourceAmount * 0.01 ? 'close-match' : '';
-            const diffBadge = diff > 0.01 ? `<span class="diff-indicator">Diff: ${this.formatCurrency(diff)}</span>` : '<span class="exact-indicator">Exact Match</span>';
+            const diffBadge = diff > 0.01 ? `<span class="diff-indicator">${this.formatCurrency(diff)}</span>` : '<span class="exact-indicator">Exact</span>';
 
-            let itemDesc = '';
             if (sourceType === 'bank') {
-                // Showing GL items
-                itemDesc = `
-                    <div class="candidate-main">
-                        <strong>${this.escapeHtml(item.accountNumber)}</strong> - ${this.escapeHtml(item.description)}
-                    </div>
-                    <div class="candidate-details">
-                        <span class="candidate-amount">${this.formatCurrency(amount)}</span>
-                        ${diffBadge}
-                    </div>
-                `;
+                return `
+                    <tr class="match-candidate-row ${matchQuality}" data-candidate-idx="${idx}" data-amount="${amount}">
+                        <td class="candidate-td-check"><input type="checkbox" name="manualMatch" value="${idx}" id="match_${idx}"></td>
+                        <td>${this.formatDate(item.date)}</td>
+                        <td class="candidate-td-desc" title="${this.escapeHtml(item.description)}">${this.escapeHtml(this.truncate(item.description, 45))}</td>
+                        <td>${this.escapeHtml(item.accountNumber)}</td>
+                        <td class="candidate-td-amount">${this.formatCurrency(amount)}</td>
+                        <td class="candidate-td-diff">${diffBadge}</td>
+                    </tr>`;
             } else {
-                // Showing Bank items
-                itemDesc = `
-                    <div class="candidate-main">
-                        <strong>${this.formatDate(item.date)}</strong> - ${this.escapeHtml(item.description)}
-                    </div>
-                    <div class="candidate-details">
-                        <span class="candidate-amount">${this.formatCurrency(amount)}</span>
-                        ${diffBadge}
-                    </div>
-                `;
+                return `
+                    <tr class="match-candidate-row ${matchQuality}" data-candidate-idx="${idx}" data-amount="${amount}">
+                        <td class="candidate-td-check"><input type="checkbox" name="manualMatch" value="${idx}" id="match_${idx}"></td>
+                        <td>${this.formatDate(item.date)}</td>
+                        <td class="candidate-td-desc" title="${this.escapeHtml(item.description)}">${this.escapeHtml(this.truncate(item.description, 50))}</td>
+                        <td class="candidate-td-amount">${this.formatCurrency(amount)}</td>
+                        <td class="candidate-td-diff">${diffBadge}</td>
+                    </tr>`;
             }
-
-            return `
-                <div class="match-candidate ${matchQuality}" data-candidate-idx="${idx}" data-amount="${amount}">
-                    <input type="checkbox" name="manualMatch" value="${idx}" id="match_${idx}">
-                    <label for="match_${idx}">
-                        ${itemDesc}
-                    </label>
-                </div>
-            `;
         }).join('');
 
         if (sortedTargets.length === 0) {
             list.innerHTML = '<p class="no-matches">No available items to match with. All items may already be matched.</p>';
             selectionSummary.style.display = 'none';
+        } else {
+            list.innerHTML = `
+                <div class="candidate-table-wrapper">
+                    <table class="candidate-table">
+                        <thead>${tableHeaders}</thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>`;
         }
 
         // Attach event listeners to checkboxes for multi-selection
-        list.querySelectorAll('.match-candidate input[type="checkbox"]').forEach(checkbox => {
+        list.querySelectorAll('.match-candidate-row input[type="checkbox"]').forEach(checkbox => {
             checkbox.addEventListener('change', (e) => {
-                const candidate = e.target.closest('.match-candidate');
-                const idx = parseInt(candidate.dataset.candidateIdx);
-                const amount = parseFloat(candidate.dataset.amount);
+                const row = e.target.closest('.match-candidate-row');
+                const idx = parseInt(row.dataset.candidateIdx);
+                const amount = parseFloat(row.dataset.amount);
 
                 if (e.target.checked) {
-                    candidate.classList.add('selected');
+                    row.classList.add('selected');
                     this.selectedMatches.push({ idx, amount });
                 } else {
-                    candidate.classList.remove('selected');
+                    row.classList.remove('selected');
                     this.selectedMatches = this.selectedMatches.filter(m => m.idx !== idx);
                 }
 
@@ -1835,10 +2515,10 @@ class BankReconciliation {
         });
 
         // Allow clicking on candidate row to toggle selection
-        list.querySelectorAll('.match-candidate').forEach(candidate => {
-            candidate.addEventListener('click', (e) => {
+        list.querySelectorAll('.match-candidate-row').forEach(row => {
+            row.addEventListener('click', (e) => {
                 if (e.target.tagName !== 'INPUT') {
-                    const checkbox = candidate.querySelector('input[type="checkbox"]');
+                    const checkbox = row.querySelector('input[type="checkbox"]');
                     checkbox.checked = !checkbox.checked;
                     checkbox.dispatchEvent(new Event('change'));
                 }
@@ -1849,9 +2529,9 @@ class BankReconciliation {
         const clearBtn = document.getElementById('clearSelectionBtn');
         if (clearBtn) {
             clearBtn.onclick = () => {
-                list.querySelectorAll('.match-candidate input[type="checkbox"]').forEach(cb => {
+                list.querySelectorAll('.match-candidate-row input[type="checkbox"]').forEach(cb => {
                     cb.checked = false;
-                    cb.closest('.match-candidate').classList.remove('selected');
+                    cb.closest('.match-candidate-row').classList.remove('selected');
                 });
                 this.selectedMatches = [];
                 this.updateSelectionSummary(sourceAmount);
@@ -1958,7 +2638,7 @@ class BankReconciliation {
             // Multi-selection - process through confirmMultiMatch
             this.selectedMatches = Array.from(selected).map(cb => ({
                 idx: parseInt(cb.value),
-                amount: parseFloat(cb.closest('.match-candidate').dataset.amount)
+                amount: parseFloat(cb.closest('.match-candidate-row').dataset.amount)
             }));
             this.confirmMultiMatch();
             return;
@@ -2468,6 +3148,9 @@ class BankReconciliation {
         this.unmatchedBank = [];
         this.unmatchedGL = [];
         this.manualMatches = [];
+        this.smartMatchSuggestions = [];
+        this.pageSize = 15;
+        this.currentPage = 1;
         this.bankFileName = '';
         this.glFileName = '';
 

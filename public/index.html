@@ -208,6 +208,16 @@
                             <tbody id="resultsTableBody"></tbody>
                         </table>
                     </div>
+                    <div id="paginationControls" class="pagination-controls" style="display: none;">
+                        <div class="pagination-size">
+                            <label>Show:</label>
+                            <button class="page-size-btn active" data-size="15">15</button>
+                            <button class="page-size-btn" data-size="50">50</button>
+                            <button class="page-size-btn" data-size="all">All</button>
+                        </div>
+                        <span id="paginationInfo" class="pagination-info"></span>
+                        <div id="paginationNav" class="pagination-nav"></div>
+                    </div>
                 </div>
 
                 <div class="action-buttons">
@@ -543,6 +553,7 @@
                 <div class="match-tabs">
                     <button class="match-tab-btn active" data-tab="existing">Select Existing</button>
                     <button class="match-tab-btn" data-tab="custom">Create Custom Entry</button>
+                    <button class="match-tab-btn" data-tab="smart">Smart Match</button>
                 </div>
 
                 <!-- Existing matches tab -->
@@ -613,6 +624,25 @@
                             <label for="customNotes">Notes (optional)</label>
                             <textarea id="customNotes" rows="2" placeholder="Additional notes about this match..."></textarea>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Smart match tab -->
+                <div id="smartMatchTab" class="match-tab-content" style="display: none;">
+                    <div class="smart-match-header">
+                        <p class="modal-description">
+                            AI-powered suggestions based on amount, description, dates, and your past matching patterns.
+                            <span class="smart-match-experimental-badge">Experimental</span>
+                        </p>
+                        <div class="smart-match-stats" id="smartMatchStats"></div>
+                    </div>
+                    <div id="smartMatchLoading" class="smart-match-loading" style="display: none;">
+                        <div class="smart-match-spinner"></div>
+                        <span>Analyzing transactions...</span>
+                    </div>
+                    <div id="smartMatchSuggestions" class="smart-match-suggestions"></div>
+                    <div id="smartMatchEmpty" class="smart-match-empty" style="display: none;">
+                        <p>No confident suggestions found for this transaction. Try the "Select Existing" tab for manual matching.</p>
                     </div>
                 </div>
             </div>
@@ -839,12 +869,22 @@
             switchMatchTab('existing');
             // Clear custom form
             clearCustomMatchForm();
+            // Clear smart match state
+            if (typeof app !== 'undefined' && app) {
+                app.smartMatchSuggestions = [];
+            }
         }
 
         function confirmManualMatch() {
             // Check which tab is active
             const customTab = document.getElementById('customMatchTab');
+            const smartTab = document.getElementById('smartMatchTab');
             const isCustomMode = customTab && customTab.style.display !== 'none';
+            const isSmartMode = smartTab && smartTab.style.display !== 'none';
+
+            if (isSmartMode) {
+                return; // Smart match uses its own accept/deny buttons
+            }
 
             if (isCustomMode) {
                 // Handle custom match creation
@@ -866,11 +906,22 @@
             // Show/hide content
             document.getElementById('existingMatchTab').style.display = tab === 'existing' ? 'block' : 'none';
             document.getElementById('customMatchTab').style.display = tab === 'custom' ? 'block' : 'none';
+            document.getElementById('smartMatchTab').style.display = tab === 'smart' ? 'block' : 'none';
 
-            // Update confirm button text
+            // Update confirm button text or hide for smart tab
             const confirmBtn = document.getElementById('manualMatchConfirmBtn');
             if (confirmBtn) {
-                confirmBtn.textContent = tab === 'custom' ? 'Create Custom Match' : 'Confirm Match';
+                if (tab === 'smart') {
+                    confirmBtn.style.display = 'none';
+                } else {
+                    confirmBtn.style.display = '';
+                    confirmBtn.textContent = tab === 'custom' ? 'Create Custom Match' : 'Confirm Match';
+                }
+            }
+
+            // Trigger smart match analysis when tab is opened
+            if (tab === 'smart' && typeof app !== 'undefined' && app) {
+                app.generateSmartMatchSuggestions();
             }
         }
 
@@ -917,18 +968,49 @@
             closeManualMatchModal();
         }
 
-        // Smooth scroll handling for navigation
-        let scrollTimeout;
-        window.addEventListener('scroll', function() {
-            const nav = document.getElementById('mainNav');
-            if (nav) {
-                if (window.scrollY > 10) {
-                    nav.classList.add('scrolled');
-                } else {
-                    nav.classList.remove('scrolled');
-                }
+    </script>
+
+    <!-- Scroll to Top Button -->
+    <button id="scrollToTopBtn" class="scroll-to-top" title="Back to top">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"/>
+        </svg>
+    </button>
+
+    <script>
+        // Scroll-to-top and nav shadow — runs after button is in the DOM
+        (function() {
+            var scrollBtn = document.getElementById('scrollToTopBtn');
+            var nav = document.getElementById('mainNav');
+
+            // Click handler
+            if (scrollBtn) {
+                scrollBtn.addEventListener('click', function() {
+                    window.scrollTo(0, 0);
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0;
+                });
             }
-        }, { passive: true });
+
+            // Scroll listener for visibility + nav shadow
+            window.addEventListener('scroll', function() {
+                var y = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+                if (nav) {
+                    if (y > 10) {
+                        nav.classList.add('scrolled');
+                    } else {
+                        nav.classList.remove('scrolled');
+                    }
+                }
+                if (scrollBtn) {
+                    if (y > 400) {
+                        scrollBtn.classList.add('visible');
+                    } else {
+                        scrollBtn.classList.remove('visible');
+                    }
+                }
+            }, { passive: true });
+        })();
     </script>
 </body>
 </html>

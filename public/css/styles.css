@@ -919,70 +919,111 @@ tbody tr:hover {
 .match-candidates-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0;
 }
 
-.match-candidate {
-    padding: 1rem;
-    border: 2px solid var(--border-color);
+/* Table-based candidate layout */
+.candidate-table-wrapper {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 350px;
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    background: var(--card-bg);
 }
 
-.match-candidate:hover {
-    background: var(--bg-color);
-    border-color: var(--primary-color);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-
-.match-candidate.exact-match {
-    border-color: var(--success-color);
-    background: var(--success-light);
-}
-
-.match-candidate.close-match {
-    border-color: #eab308;
-    background: #fef9c3;
-}
-
-.match-candidate input[type="radio"] {
-    cursor: pointer;
-    margin-top: 0.25rem;
-    width: 18px;
-    height: 18px;
-}
-
-.match-candidate label {
-    cursor: pointer;
-    flex: 1;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.candidate-main {
-    font-size: 0.95rem;
-    color: var(--text-primary);
-}
-
-.candidate-details {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
+.candidate-table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 0.875rem;
 }
 
-.candidate-amount {
+.candidate-table thead {
+    background: var(--bg-color);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.candidate-table th {
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--border-color);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.candidate-th-check {
+    width: 36px;
+}
+
+.candidate-table td {
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+    white-space: nowrap;
+}
+
+.candidate-td-check {
+    width: 36px;
+    text-align: center;
+}
+
+.candidate-td-check input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.candidate-td-desc {
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.candidate-td-amount {
     font-weight: 600;
     color: var(--primary-color);
-    font-size: 1rem;
+}
+
+.candidate-td-diff {
+    white-space: nowrap;
+}
+
+.match-candidate-row {
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.match-candidate-row:hover {
+    background: var(--primary-50);
+}
+
+.match-candidate-row.exact-match {
+    background: var(--success-light);
+}
+
+.match-candidate-row.exact-match:hover {
+    background: #bbf7d0;
+}
+
+.match-candidate-row.close-match {
+    background: #fef9c3;
+}
+
+.match-candidate-row.close-match:hover {
+    background: #fef08a;
+}
+
+.match-candidate-row.selected {
+    background: var(--primary-light);
+}
+
+.match-candidate-row.selected td {
+    font-weight: 500;
 }
 
 .diff-indicator {
@@ -2044,25 +2085,29 @@ tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Match candidates in dark mode */
-.theme-dark .match-candidate {
-    background-color: #0f172a;
+/* Match candidate table in dark mode */
+.theme-dark .candidate-table-wrapper {
     border-color: var(--border-color);
 }
 
-.theme-dark .match-candidate:hover {
+.theme-dark .candidate-table thead {
+    background: #0f172a;
+}
+
+.theme-dark .match-candidate-row:hover {
     background-color: #1e293b;
-    border-color: var(--primary-color);
 }
 
-.theme-dark .match-candidate.exact-match {
+.theme-dark .match-candidate-row.exact-match {
     background-color: rgba(4, 120, 87, 0.15);
-    border-color: var(--success-color);
 }
 
-.theme-dark .match-candidate.close-match {
+.theme-dark .match-candidate-row.close-match {
     background-color: rgba(59, 130, 246, 0.15);
-    border-color: #3b82f6;
+}
+
+.theme-dark .match-candidate-row.selected {
+    background-color: rgba(37, 99, 235, 0.2);
 }
 
 /* Fix yellow/warning colors in dark mode for readability */
@@ -2077,7 +2122,7 @@ tbody tr:hover {
     color: #93c5fd;
 }
 
-.theme-dark .candidate-amount {
+.theme-dark .candidate-td-amount {
     color: #93c5fd;
 }
 
@@ -2099,24 +2144,25 @@ tbody tr:hover {
 /* Match Modal Tabs */
 .match-tabs {
     display: flex;
-    gap: 0.5rem;
+    gap: 0;
     margin-bottom: 1rem;
     border-bottom: 2px solid var(--border-light);
     padding-bottom: 0;
 }
 
 .match-tab-btn {
-    padding: 0.75rem 1.25rem;
+    padding: 0.625rem 1rem;
     background: none;
     border: none;
     border-bottom: 3px solid transparent;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 500;
     font-family: var(--font-primary);
     cursor: pointer;
     transition: all var(--transition-fast);
     margin-bottom: -2px;
+    white-space: nowrap;
 }
 
 .match-tab-btn:hover {
@@ -2297,20 +2343,7 @@ tbody tr:hover {
     color: var(--danger-color);
 }
 
-/* Match Candidate Checkbox Style */
-.match-candidate input[type="checkbox"] {
-    cursor: pointer;
-    width: 20px;
-    height: 20px;
-    margin-top: 0.25rem;
-    accent-color: var(--primary-color);
-}
-
-.match-candidate.selected {
-    background: var(--primary-50);
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow-md);
-}
+/* Old card-based match candidate styles removed - now using table layout */
 
 /* Table Sorting */
 th.sortable {
@@ -2380,10 +2413,7 @@ th.sortable.sort-desc::after {
     color: #93c5fd;
 }
 
-.theme-dark .match-candidate.selected {
-    background: rgba(30, 64, 175, 0.15);
-    border-color: var(--primary-color);
-}
+/* .match-candidate-row.selected dark mode is already handled above */
 
 .theme-dark th.sortable:hover {
     background: rgba(30, 64, 175, 0.15);
@@ -2582,4 +2612,486 @@ th.sortable.sort-desc::after {
 .theme-dark ::selection {
     background-color: rgba(30, 64, 175, 0.4);
     color: white;
+}
+
+/* ==============================
+   Smart Match Tab
+   ============================== */
+
+.smart-match-experimental-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    background: var(--warning-light);
+    color: var(--warning-color);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+}
+
+.smart-match-header {
+    margin-bottom: 0.75rem;
+}
+
+.smart-match-stats {
+    margin-top: 0.5rem;
+}
+
+.smart-stats-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.smart-match-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    color: var(--text-secondary);
+}
+
+.smart-match-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid var(--border-light);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: smartSpin 0.8s linear infinite;
+}
+
+@keyframes smartSpin {
+    to { transform: rotate(360deg); }
+}
+
+.smart-match-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+/* Let the modal-body scroll — no nested scroll here */
+.smart-match-suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.smart-match-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--border-color);
+    background: var(--card-bg);
+}
+
+.smart-match-card.confidence-high {
+    border-left-color: var(--success-color);
+}
+
+.smart-match-card.confidence-medium {
+    border-left-color: var(--primary-color);
+}
+
+.smart-match-card.confidence-low {
+    border-left-color: var(--warning-color);
+}
+
+/* Card top — confidence meter bar + percentage */
+.smart-match-card-top {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-color);
+    border-bottom: 1px solid var(--border-light);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.confidence-meter {
+    flex: 1;
+    height: 6px;
+    background: var(--border-light);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.confidence-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+.confidence-high .confidence-fill { background: var(--success-color); }
+.confidence-medium .confidence-fill { background: var(--primary-color); }
+.confidence-low .confidence-fill { background: var(--warning-color); }
+
+.confidence-pct {
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.confidence-pct.confidence-high { color: var(--success-color); }
+.confidence-pct.confidence-medium { color: var(--primary-color); }
+.confidence-pct.confidence-low { color: var(--warning-color); }
+
+/* Card body — target info table + reasons */
+.smart-match-card-body {
+    padding: 0.75rem;
+}
+
+/* Labeled target info table (single match) */
+.smart-target-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+}
+
+.smart-target-table th {
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+}
+
+.smart-target-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: none;
+}
+
+.smart-field-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    width: 90px;
+}
+
+.target-amount {
+    font-weight: 600;
+    color: var(--primary-color);
+    white-space: nowrap;
+}
+
+.smart-match-split-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 0.25rem;
+}
+
+/* Reasons — compact inline chips */
+.smart-match-reasons {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    align-items: center;
+}
+
+.reason-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg-color);
+    border-radius: 4px;
+    border: 1px solid var(--border-light);
+}
+
+.reason-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary-50);
+    color: var(--primary-color);
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 0.6rem;
+    flex-shrink: 0;
+}
+
+/* Card actions — accept/deny buttons */
+.smart-match-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--border-light);
+}
+
+.smart-match-deny-btn {
+    padding: 0.5rem 1.25rem;
+    border: 1.5px solid var(--danger-color);
+    background: none;
+    color: var(--danger-color);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-primary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.smart-match-deny-btn:hover {
+    background: var(--danger-light);
+}
+
+.smart-match-accept-btn {
+    padding: 0.5rem 1.5rem;
+    border: none;
+    background: var(--success-color);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.smart-match-accept-btn:hover {
+    background: #065f46;
+}
+
+/* Smart Match dark mode */
+.theme-dark .smart-match-card {
+    border-color: var(--border-color);
+    background: var(--card-bg);
+}
+
+.theme-dark .smart-match-card.confidence-high {
+    border-left-color: var(--success-color);
+}
+
+.theme-dark .smart-match-card.confidence-medium {
+    border-left-color: var(--primary-color);
+}
+
+.theme-dark .smart-match-card.confidence-low {
+    border-left-color: var(--warning-color);
+}
+
+.theme-dark .smart-match-card-top {
+    background: #0f172a;
+}
+
+.theme-dark .confidence-meter {
+    background: #1e293b;
+}
+
+.theme-dark .reason-chip {
+    background: #1e293b;
+    border-color: #334155;
+}
+
+.theme-dark .reason-icon {
+    background: rgba(30, 64, 175, 0.2);
+}
+
+.theme-dark .smart-target-table td {
+    color: var(--text-primary);
+}
+
+.theme-dark .smart-match-deny-btn:hover {
+    background: rgba(185, 28, 28, 0.2);
+}
+
+.theme-dark .smart-match-accept-btn {
+    background: #065f46;
+}
+
+.theme-dark .smart-match-accept-btn:hover {
+    background: #047857;
+}
+
+.theme-dark .smart-match-experimental-badge {
+    background: rgba(180, 83, 9, 0.2);
+}
+
+/* ==============================
+   Pagination Controls
+   ============================== */
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-light);
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.pagination-size {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.pagination-size label {
+    font-weight: 500;
+}
+
+.page-size-btn {
+    padding: 0.3rem 0.7rem;
+    border: 1.5px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.page-size-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.page-size-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.pagination-info {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.pagination-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.page-nav-btn {
+    padding: 0.3rem 0.6rem;
+    border: 1.5px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-primary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.page-nav-btn:hover:not(:disabled) {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.page-nav-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.page-nav-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+/* Dark mode pagination */
+.theme-dark .page-size-btn {
+    background: var(--card-bg);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.theme-dark .page-size-btn.active {
+    background: var(--primary-color);
+    color: white;
+}
+
+.theme-dark .page-nav-btn {
+    background: var(--card-bg);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.theme-dark .page-nav-btn.active {
+    background: var(--primary-color);
+    color: white;
+}
+
+/* ==============================
+   Scroll-to-Top Button
+   ============================== */
+
+.scroll-to-top {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    box-shadow: var(--shadow-lg);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    opacity: 0;
+    transform: translateY(16px);
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease, background 0.15s ease;
+}
+
+.scroll-to-top.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.scroll-to-top:hover {
+    background: var(--primary-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-xl);
+}
+
+.scroll-to-top:active {
+    transform: translateY(0);
+}
+
+.scroll-to-top svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Dark mode scroll-to-top */
+.theme-dark .scroll-to-top {
+    background: #3b82f6;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.theme-dark .scroll-to-top:hover {
+    background: #2563eb;
 }
